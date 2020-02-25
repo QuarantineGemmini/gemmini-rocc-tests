@@ -4,8 +4,8 @@ XLEN            := @XLEN@
 RISCVTOOLS      := @RISCVTOOLS@
 ROCC = examples
 
-.PHONY: all bareMetalC clean imagenet mlps ee290
-all: bareMetalC mobilenet imagenet mlps resnet ee290
+.PHONY: all bareMetalC clean imagenet mlps ee290 ee290-orig
+all: bareMetalC mobilenet imagenet mlps resnet ee290 ee290-orig
 
 vars = \
 	abs_top_srcdir=$(abs_top_srcdir) \
@@ -27,6 +27,10 @@ imagenet:
 	$(MAKE) -C $@ -f $(abs_top_srcdir)/$@/Makefile $(vars)
 
 ee290:
+	mkdir -p $@
+	$(MAKE) -C $@ -f $(abs_top_srcdir)/$@/Makefile $(vars)
+
+ee290-orig:
 	mkdir -p $@
 	$(MAKE) -C $@ -f $(abs_top_srcdir)/$@/Makefile $(vars)
 
