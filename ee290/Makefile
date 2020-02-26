@@ -19,8 +19,10 @@ else
 	tests_linux = $(tests:=-linux)
 endif
 
-BENCH_COMMON = $(abs_top_srcdir)/riscv-tests/benchmarks/common
-GEMMINI_HEADERS = $(abs_top_srcdir)/include/gemmini.h $(abs_top_srcdir)/include/gemmini_params.h
+BENCH_COMMON    = $(abs_top_srcdir)/riscv-tests/benchmarks/common
+GEMMINI_HEADERS = $(abs_top_srcdir)/include/new/include/gemmini.h \
+									$(abs_top_srcdir)/include/new/include/gemmini_params.h \
+									$(abs_top_srcdir)/include/new/include/gemmini_tiler.h
 
 CFLAGS := $(CFLAGS) \
 	-DPREALLOCATE=1 \
