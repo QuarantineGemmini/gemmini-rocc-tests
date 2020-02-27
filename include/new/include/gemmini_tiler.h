@@ -93,6 +93,13 @@ gemmini_t* create_gemmini(size_t M, size_t N, size_t K,
   const size_t tiles_per_sp_bank  = BANK_ROWS / tile_rows;
   const size_t tiles_per_acc      = ACC_ROWS / tile_rows;
 
+  // issue gemini commands
+  gemmini_config_ex(self->DATAFLOW, 
+                    self->ACTIVATION, 
+                    self->SYSTOLIC_OUTPUT_RSHIFT, 
+                    self->ACCUMULATOR_OUTPUT_RSHIFT,
+                    self->RELU6_INPUT_LSHIFT);
+
   // configure the systolic array and accumulator
   self->DATAFLOW                  = WEIGHT_STATIONARY;
   self->ACTIVATION                = act;
@@ -341,14 +348,16 @@ bool next_output_group_counters(gemmini_t *self) {
   //--------------------------------------------------------------------------
   // finish updating the output group
   //--------------------------------------------------------------------------
-  self->cur_og_tile_row_start   = next_og_tile_row_start;
-  self->cur_og_tile_row_end     = next_og_tile_row_end;
-  self->cur_og_tile_col_start   = next_og_tile_col_start;
-  self->cur_og_tile_col_end     = next_og_tile_col_end;
-  self->cur_og_tile_index       = 0;
-  self->cur_og_tile_row_offset  = 0;
-  self->cur_og_tile_col_offset  = 0;
-  self->cur_k_subcol            = 0;
+  // locally-modifiable state defined at this loop level
+  self->loop1_tile_row_start   = next_og_tile_row_start;
+  self->loop1_tile_row_end     = next_og_tile_row_end;
+  self->loop1_tile_col_start   = next_og_tile_col_start;
+  self->loop1_tile_col_end     = next_og_tile_col_end;
+
+  // globally-modifiable state defined at this loop level
+  self->gbl_tile_index = 0;
+  self->gbl_tile_row   = 0;
+  self->gbl_tile_col   = 0;
 
   return true;
 }
@@ -421,23 +430,6 @@ void load_A_tile_into_sp(gemmini_t *self) {
   // issue gemmini commands
   gemmini_config_ld(mem_stride);
   gemmini_mvin(mem_start, sp_start);
-}
-
-void matmul_and_accumulate(gemmini_t *self) {
-  // calculate compute parameters
-  //const size_t A_sp_start = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
-  const size_t A_sp_row_start = self->cur_a_tile_sp_addr;
-  const size_t D_sp_row_start = self->USE_D_MATRIX ? self->cur_d_tile_sp_addr 
-                                                   : GARBAGE_ADDR;
-
-  // issue gemini commands
-  gemmini_config_ex(self->DATAFLOW, 
-                    self->ACTIVATION, 
-                    self->SYSTOLIC_OUTPUT_RSHIFT, 
-                    self->ACCUMULATOR_OUTPUT_RSHIFT,
-                    self->RELU6_INPUT_LSHIFT);
-
-  gemmini_compute_accumulated(A_sp_row_start, D_sp_row_start);
 }
 
 void store_C_tile_into_mem(gemmini_t *self) {
@@ -513,8 +505,6 @@ void store_C_tile_into_mem(gemmini_t *self) {
 }
 
 
-
-
 // 2-D array coordinates: upper-left is (0,0), and lower-right is (M,N)
 void incr_output_group(gemmini_t *self) {
   const size_t next_og_row = self->og_index / self->OG_ROW_MAX;
@@ -538,35 +528,6 @@ void incr_output_group(gemmini_t *self) {
                         ? (self->og_start_tile_row + self->OG_TILE_HEIGHT - 1)
                         : (self->OM_TILE_ROWS - 1);
 }
-
-void do_matmul(struct Gemmini* self) {
-  const size_t num_output_groups = self->num_output_groups();
-  for(size_t ogroup=0; ogroup < num_output_groups; ogroup += 1) {
-    self->incr_output_group(self);
-    self->do_next_output_group(self);
-  }
-}
-
-void is_last_subrow(gemmini_t *self) {
-  return self->og_cur_tile_row_offset == (self->og_tile_rows - 1);
-}
-
-void is_last_subcol(gemmini_t *self) {
-  return self->og_cur_tile_col_offset == (self->og_tile_cols - 1);
-}
-
-
-// - if 32nd bit of scratchpad addr is high, it refers to accumulator
-//   - if 31st bit is high, results are accumulated, otherwise, overwritten
-void begin_initial_weight_row(struct Gemmini* self) {
-  // load this weigth tile into accum from memory
-  // prefetch the next weight tile into prefetch scratchpad bank
-  gemmini_config_ld(
-  matmul.preload(
-
-}
-
-  gemmini_config_ld();
 
 //============================================================================
 // Tiling Loop #2: accumulate 1 iteration of all tiles in an output group
@@ -633,9 +594,10 @@ bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
   self->loop3_C_mem_start    += self->TILE_BYTE_WIDTH;
   self->loop3_D_mem_start    += self->TILE_BYTE_WIDTH;
 
-  // see note in reset_A_tile_subcol
-  self->gbl_B_cur_sp_addr = self->gbl_B_alt_sp_addr;
-  self->gbl_B_alt_sp_addr = self->gbl_B_cur_sp_addr;
+  // swap current/alternate B-tile scratchpad addrs
+  const size_t tmp_B_sp_addr  = self->gbl_B_cur_sp_addr;
+  self->gbl_B_cur_sp_addr     = self->gbl_B_alt_sp_addr;
+  self->gbl_B_alt_sp_addr     = tmp_B_sp_addr;
 
   return self->loop3_group_tile_col != self->loop1_group_tile_col_end;
 }
@@ -648,20 +610,151 @@ bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
 // TODO: investigate: if I call preload 10 times in a row, will they just
 //       overwrite the same flops in the systolic-array? so when i call
 //       matmul.compute.preloaded, it loads the last one i preload()ed?
-//       This would be IDEAL.
-void preload_B_tile_into_array(gemmini_t *self) {
-  // calculate preload parameters
+//       This would be IDEAL. I think the answer is yes.
+// TODO: right now, mesh MUST be square (block_size) since ctrl signals are
+//       hardcoded to think that way. this is ok with me
+
+void preload_B_tile_into_array_and_set_C_tile_in_acc(gemmini_t *self) {
+  // on first tile in 4th loop: preload this B-tile
+  // else:                      preload garbage B-tile (no scratchpad load)
+  const size_t B_sp_start = self->gbl_tile_row == self->loop1_tile_row_start ?
+                            self->gbl_B_cur_sp_ptr :
+                            GARBAGE_ADDR;
+
+  // on first k-col in 2nd loop: overwrite c in accumulator
+  // else:                       accumulate c in accumulator
+  const size_t C_acc_start = self->loop2_k_col == 0 ?
+                             ACC_ADDR_NEW(self->loop4_C_acc_start) :
+                             ACC_ADDR_ACC(self->loop4_C_acc_start);
+
+  // execute preload command
+  gemmini_preload(B_sp_start, C_sp_start);
+}
+
+void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
+  self->loop4_A_sp_addr = 0;
+  self->loop4_C_sp_addr = self->loop3_C_sp_addr;
+  self->loop4_D_sp_addr = self->loop4
+                           (self->REPEATING_BIAS ? 0 :
+                            self->loop4_D_sp_addr + 
+                            self->D_BYTES_PER_TILE_ROW) :
+                           GARBAGE_ADDR;
+
+  self->loop4_D_mem_addr = self->loop3_D_mem_addr;
+                           (self->REPEATING_BIAS ? 0 :
+                            self->loop4_D_sp_addr + 
+                            self->D_BYTES_PER_TILE_ROW) :
+                           GARBAGE_ADDR;
+
+}
+
+void maybe_move_D_tile_into_sp(gemmini_t *self) {
+  if(self->loop2_k_col != 0) {
+    // only move D-tiles in during first partial-sum accumulation
+    return;
+  }
+  // calculate mvin parameters
+  const size_t mem_start  = self->loop4_D_mem_start;
+  const size_t mem_stride = self->B_BYTE_WIDTH;
+  const size_t sp_start   = self->gbl_D_cur_sp_addr;
+
+  // issue gemmini commands
+  gemmini_config_ld(mem_stride);
+  gemmini_mvin(mem_start, sp_start);
+}
+}
+
+bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
+  if(self->gbl_tile_row == self->loop1_tile_row_end) {
+    return false;
+  }
+  self->gbl_tile_row += 1;
+
+  self->loop4_A_sp_addr += self->A_BYTES_PER_TILE_ROW :
+  self->loop4_D_sp_addr  = self->loop2_k_col == 0 ?
+                           (self->REPEATING_BIAS ? 0 :
+                            self->loop4_D_sp_addr + 
+                            self->D_BYTES_PER_TILE_ROW) :
+                           GARBAGE_ADDR;
+
+  // increment D-tile mem addr only if non-repeating and at first k-col
+  self->loop4_D_mem_addr += (self->loop2_k_col == 0 || self->REPEATING_BIAS) ?
+                            0 : self->D_BYTES_PER_TILE_ROW;
+
+  // swap current/alternate D-tile scratchpad addrs
+  const size_t tmp_D_sp_addr  = self->gbl_D_cur_sp_addr;
+  self->gbl_D_cur_sp_addr     = self->gbl_D_alt_sp_addr;
+  self->gbl_D_alt_sp_addr     = tmp_D_sp_addr;
+  return true;
+}
+
+void do_matmul(gemmini_t *self) {
+  const size_t A_sp_addr = self->loop4_A_sp_addr;
+  const size_t D_sp_addr = self->loop4_D_sp_addr;
+
+  gemmini_compute_accumulated(A_sp_row_start, D_sp_row_start);
+}
+
+}
+
+// inside ex_ctrl:
+// ---------------
+// - flush, compute, cmd_wait states:
+//   - only does a flush when matmul_is_in_progress and a new preload or 
+//     new matmul have not been issued. Flush means a ex_config is pending
+//   - ctrl will not send new preload/matmul cmds to mesh until the all rows 
+//     previous rows have entered the shifters. 
+// - propagate notes
+//   - in_prop_flush is ALWAYS 0 for WS flows
+//   - in_prop is set to 1 ONLY if preload() is called, regardless of B/C addrs
+// - mesh_ctrl_signals for propagate in WS mode:
+//   1) 0 if flushing (no command being sent to mesh)
+//   2) 0 if issuing a single_preload with no overlapping matmul
+//   3) 0 if issuing both a preload and a matmul-accumulate
+//   4) 0 if issuing a single matmul-accumulate
+//   5) 1 if issuing both a preload and a matmul-preloaded
+//   5) 1 if issuing a single matmul-preloaded
+// - C_addr handling
+//   - you MUST issue a preload and then a matmul.{prop,accum} immediatly
+//   - when you do this, they both get scheduled to the mesh together
+//   - C_addr does not persist if you don't issue both right away
+// - HOW TO SCHEDULE B-prop AND C-accum addrs
+//   - on first tile in 4th loop: 
+//       1) preload this B-tile and set this C_addr
+//       2) matmul.preloaded
+//   - on subsequent tiles in 4th loop:
+//       1) preload garbage B-tile (avoid scratchpad load) and set this C_addr
+//       2) matmul.accumulated 
+//          - THIS DOES NOT MEAN C IS ACCUMULATED/OVERWRITTEN -- ORTHOGONAL!!!
+//          - THIS MEANS USE NEW C VALUE BUT KEEP THE B VALUE IN ARRAY
+//
+// inside mesh_with_delays:
+// ---------------
+// - in_prop is 0 or 1
+// - in_prop will toggle when the mesh_ctrl_signals.propagate is 1 AND
+//   it just finished loading the previous matmul inputs into shifters+mesh
+
+
+void set_C_tile_addr_in_acc(gemmini_t *self) {
+  // TODO: make 2 new instructions to preload B and set C separately
   const size_t B_sp_start = self->gbl_B_cur_sp_ptr;
   const size_t C_sp_start = self->loop2_use_accumulators ? 
-                            ACC_ADDR_ACC(self->loop3_C_mem_start) :
-                            ACC_ADDR_NEW(self->loop3_C_mem_start);
+                            ACC_ADDR_ACC(self->loop4_og_tile_index) :
+                            ACC_ADDR_NEW(self->loop3_og_tile_index);
   // issue gemmini commands
   gemmini_preload(B_sp_start, C_sp_start);
 }
 
-void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
-
+void set_C_tile_addr_in_acc(gemmini_t *self) {
+  // calculate preload parameters
+  const size_t B_sp_start = GARBAGE_ADDR;
+  const size_t C_sp_start = self->loop2_use_accumulators ? 
+                            ACC_ADDR_ACC(self->loop4_og_tile_index) :
+                            ACC_ADDR_NEW(self->loop3_og_tile_index);
+  // issue gemmini commands
+  gemmini_preload(B_sp_start, C_sp_start);
 }
+
 
 //============================================================================
 // Tiling Loop #4
@@ -802,13 +895,12 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
       move_first_B_tile_into_sp(self);
       reset_B_tile_subcol_in_subrow(self);
       do {
-        preload_B_tile_into_array(self);
         maybe_move_next_B_tile_into_sp(self);
         reset_A_tile_subrow_in_subcol(self);
         do {
-          set_C_tile_addr_in_sp(self);
           maybe_move_A_tile_into_sp(self);
           maybe_move_D_tile_into_sp(self);
+          preload_B_tile_into_array_and_set_C_tile_in_acc(self);
           do_matmul(self);
           maybe_move_C_tile_into_mem(self);
 
