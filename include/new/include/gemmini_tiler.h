@@ -536,6 +536,21 @@ void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
   self->gbl_B_cur_sp_addr = self->gbl_B_alt_sp_addr;
   self->gbl_B_alt_sp_addr = self->gbl_B_cur_sp_addr;
 
+  self->loop4_A_sp_addr = 0;
+  self->loop4_C_sp_addr = self->loop3_C_sp_addr;
+  self->loop4_D_sp_addr = self->loop4
+                           (self->REPEATING_BIAS ? 0 :
+                            self->loop4_D_sp_addr + 
+                            self->D_BYTES_PER_TILE_ROW) :
+                           GARBAGE_ADDR;
+
+  self->loop4_D_mem_addr = self->loop3_D_mem_addr;
+                           (self->REPEATING_BIAS ? 0 :
+                            self->loop4_D_sp_addr + 
+                            self->D_BYTES_PER_TILE_ROW) :
+                           GARBAGE_ADDR;
+
+
 }
 
 bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
@@ -560,56 +575,32 @@ bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
 //============================================================================
 
 void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
-  assert(self->gbl_tile_row == self->loop1_tile_row_start);
+  // this scope modifies: self->self->gbl_tile_row
 
-  self->loop4_A_mem_addr;
-  self->loop4_A_sp_row_addr;
+  self->loop4_A_mem_addr     = self->loop2_A_mem_addr;
+  self->loop4_C_mem_addr     = self->loop3_C_mem_addr;
+  self->loop4_D_mem_addr     = self->loop3_D_mem_addr;
 
-  self->loop4_D_mem_addr;
-  // don't swap self->gbl_D_cur_sp_row_addr during this reset
-
-  self->loop4_A_sp_addr = 0;
-  self->loop4_C_sp_addr = self->loop3_C_sp_addr;
-  self->loop4_D_sp_addr = self->loop4
-                           (self->REPEATING_BIAS ? 0 :
-                            self->loop4_D_sp_addr + 
-                            self->D_BYTES_PER_TILE_ROW) :
-                           GARBAGE_ADDR;
-
-  self->loop4_D_mem_addr = self->loop3_D_mem_addr;
-                           (self->REPEATING_BIAS ? 0 :
-                            self->loop4_D_sp_addr + 
-                            self->D_BYTES_PER_TILE_ROW) :
-                           GARBAGE_ADDR;
-
+  self->loop4_A_sp_row_addr  = 0;
+  self->loop4_C_acc_row_addr = self->loop3_C_acc_row_addr;
+  self->loop4_D_acc_row_addr = self->loop3_D_acc_row_addr;
 }
 
 bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
-  self->gbl_tile_row;
-
-
   if(self->gbl_tile_row == self->loop1_tile_row_end) {
     // just finished the final row of tiles in the 4th loop, so were done
     return false;
   }
   self->gbl_tile_row += 1;
 
-  self->loop4_A_sp_addr += self->A_BYTES_PER_TILE_ROW :
-  self->loop4_D_sp_addr  = self->loop2_k_col == 0 ?
-                           (self->REPEATING_BIAS ? 0 :
-                            self->loop4_D_sp_addr + 
-                            self->D_BYTES_PER_TILE_ROW) :
-                           GARBAGE_ADDR;
+  self->loop4_A_mem_addr     += self->A_BYTES_PER_TILE_ROW;
+  self->loop4_C_mem_addr     += self->C_BYTES_PER_TILE_ROW;
+  self->loop4_D_mem_addr     += (self->HAS_BIAS && !self->REPEATING_BIAS) ?
+                                self->D_BYTES_PER_TILE_ROW : 0;
 
-  // increment D-tile mem addr only if non-repeating and at first k-col
-  self->loop4_D_mem_addr += (self->loop2_k_col == 0 || self->REPEATING_BIAS) ?
-                            0 : self->D_BYTES_PER_TILE_ROW;
-
-  // swap current/alternate D-tile scratchpad addrs
-  const size_t tmp_D_sp_addr  = self->gbl_D_cur_sp_addr;
-  self->gbl_D_cur_sp_addr     = self->gbl_D_alt_sp_addr;
-  self->gbl_D_alt_sp_addr     = tmp_D_sp_addr;
-  return true;
+  self->loop4_A_sp_row_addr  += self->BYTE_ROWS_PER_TILE;
+  self->loop4_C_acc_row_addr += self->BYTE_ROWS_PER_TILE;
+  self->loop4_D_acc_row_addr += self->BYTE_ROWS_PER_TILE;
 }
 
 void maybe_move_A_tile_into_sp(gemmini_t *self) {
@@ -628,24 +619,24 @@ void maybe_move_A_tile_into_sp(gemmini_t *self) {
   gemmini_mvin(A_mem_addr, A_sp_row_addr);
 }
 
-void maybe_move_D_tile_into_sp(gemmini_t *self) {
+void maybe_move_D_tile_into_acc(gemmini_t *self) {
   if(!(self->loop2_k_tile_col == 0 && self->HAS_BIAS)) {
     // only move D-tiles in during first partial-sum in an output-group
     return;
   }
 
   // calculate mvin parameters (NOTE: we know D is valid at this point)
-  const size_t D_mem_addr    = self->loop4_D_mem_addr;
-  const size_t D_mem_stride  = self->REPEATING_BIAS ? 0 : 
-                               self->D_BYTES_PER_ROW;
-  const size_t D_sp_row_addr = self->gbl_D_cur_sp_row_addr;
+  const size_t D_mem_addr     = self->loop4_D_mem_addr;
+  const size_t D_mem_stride   = self->REPEATING_BIAS ? 0 : 
+                                self->D_BYTES_PER_ROW;
+  const size_t D_acc_row_addr = ACC_ADDR_NEW(self->loop4_D_acc_row_addr);
 
   // issue gemmini commands
   gemmini_config_ld(D_mem_stride);
-  gemmini_mvin(D_mem_addr, D_sp_row_addr);
+  gemmini_mvin(D_mem_addr, D_acc_row_addr);
 }
 
-void preload_B_tile_into_array_and_set_C_tile_in_acc(gemmini_t *self) {
+void preload_B_tile_into_array_and_set_C_addr_in_acc(gemmini_t *self) {
   // on first tile in 4th loop: preload this B-tile
   // else:                      preload garbage B-tile (no scratchpad load)
   const size_t B_sp_row_addr = (self->gbl_tile_row == 
@@ -653,11 +644,12 @@ void preload_B_tile_into_array_and_set_C_tile_in_acc(gemmini_t *self) {
                                self->gbl_B_cur_sp_row_addr :
                                GARBAGE_ADDR;
 
-  // on first k-col in 2nd loop: overwrite c in accumulator
-  // else:                       accumulate c in accumulator
-  const size_t C_acc_row_addr = self->loop2_k_tile_col == 0 ?
-                                ACC_ADDR_NEW(self->loop4_C_acc_row_addr) :
-                                ACC_ADDR_ACC(self->loop4_C_acc_row_addr);
+  // if has D-bias already loaded: accumulate c in accumulator
+  // elif first k-col in 2nd loop: overwrite c in accumulator
+  // else:                         accumulate c in accumulator
+  const size_t C_acc_row_addr = self->HAS_BIAS || self->loop2_k_tile_col > 0 ?
+                                ACC_ADDR_ACC(self->loop4_C_acc_row_addr) :
+                                ACC_ADDR_NEW(self->loop4_C_acc_row_addr);
 
   // execute preload command
   gemmini_preload(B_sp_row_addr, C_acc_row_addr);
@@ -666,13 +658,12 @@ void preload_B_tile_into_array_and_set_C_tile_in_acc(gemmini_t *self) {
 void do_matmul(gemmini_t *self) {
   // calculate compute parameters
   const size_t A_sp_row_addr = self->loop4_A_sp_row_addr;
-  const size_t D_sp_row_addr = self->gbl_D_cur_sp_row_addr;
 
   // on first tile in 4th loop: compute_preloaded, else: compute_accumulated
   if(self->gbl_tile_row == self->loop1_tile_row_start) {
-    gemmini_compute_preloaded(A_sp_row_addr, D_sp_row_addr);
+    gemmini_compute_preloaded(A_sp_row_addr, GARBAGE_ADDR);
   } else {
-    gemmini_compute_accumulated(A_sp_row_addr, D_sp_row_addr);
+    gemmini_compute_accumulated(A_sp_row_addr, GARBAGE_ADDR);
   }
 }
 
@@ -782,8 +773,8 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         reset_A_tile_subrow_in_subcol(self);
         do {
           maybe_move_A_tile_into_sp(self);
-          maybe_move_D_tile_into_sp(self);
-          preload_B_tile_into_array_and_set_C_tile_in_acc(self);
+          maybe_move_D_tile_into_acc(self);
+          preload_B_tile_into_array_and_set_C_addr_in_acc(self);
           do_matmul(self);
           maybe_move_C_tile_into_mem(self);
 
@@ -800,12 +791,21 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 
 // main todos:
 // TODO: make 2 new instructions to preload B and set C separately
+// TODO: what to do about input matrices that are not at tile-granularity?
+//       we need to add support for this in hardware by automatically adding
+//       zeros
+// TODO: fix the messed up ratio of spad and accumulator rows. there should
+//       be way more acc rows than sp rows in this scheme im using, for max
+//       utilization and data-reuse
+//
 // DONE: make instruction to load D-tile straight into an accumulator bank,
 //       while expanding the bit-width automatically if needed
 //       SOLUTION: you can load D straight into accumulator already. the
 //       input D matrix has element-sizes of acc_t!!
 // DONE: when accumulator writes out, write out in size of elem_t, not acc_t
-//    
+//       SOLUTION: the AccumulatorMem always reads-out with inputType elements.
+//       in the "activation/shift pipeline", it clips the shifted value to 
+//       the input size. This is why the C_matrix is of elem_t, and not acc_t
 //
 // other TODO's
 // TODO: should we enable bias D-matrices with element size of elem_t instead
