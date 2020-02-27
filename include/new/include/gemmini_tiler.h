@@ -1,6 +1,8 @@
 #ifndef __GEMMINI_TILER_H__
 #define __GEMMINI_TILER_H__
 
+#include <stdint.h>
+
 //============================================================================
 // WARNING!!!!
 // -----------
@@ -8,8 +10,84 @@
 // - i use static inline a lot, which typically doesn't make sense in headers
 //============================================================================
 
+typedef uint16_t tile_t;
+typedef uint16_t sp_addr_t;
+typedef uintptr_t mem_addr_t;
+
 typedef struct gemmini {
-  size_t state...
+  // global state across all loops
+  tile_t      gbl_tile_row;
+  tile_t      gbl_tile_row;
+  sp_row_t    gbl_B_cur_sp_row_addr;
+  sp_row_t    gbl_B_alt_sp_row_addr;
+
+  // global state that is reset for each output-group
+  sp_row_t    gbl_C_acc_row_addr;
+  sp_row_t    gbl_D_acc_row_addr;
+
+  // loop1 local state
+  tile_t      loop1_tile_col_start;
+  tile_t      loop1_tile_col_end;
+  tile_t      loop1_tile_row_start;
+  tile_t      loop1_tile_row_end;
+  mem_addr_t  loop1_A_mem_addr;
+  mem_addr_t  loop1_B_mem_addr;
+  mem_addr_t  loop1_C_mem_addr;
+  mem_addr_t  loop1_D_mem_addr;
+
+  // loop2 local state
+  tile_t      loop2_k_tile_col;
+  mem_addr_t  kloop2_A_mem_addr;
+  mem_addr_t  kloop2_B_mem_addr;
+  mem_addr_t  kloop2_C_mem_addr;
+  mem_addr_t  kloop2_D_mem_addr;
+
+  // loop3 local state
+  mem_addr_t  loop3_A_mem_addr;
+  mem_addr_t  loop3_B_mem_addr;
+  mem_addr_t  loop3_C_mem_addr;
+  mem_addr_t  loop3_D_mem_addr;
+
+  // loop4 local state
+  sp_row_t    loop4_A_sp_row_addr;
+  mem_addr_t  loop4_A_mem_addr;
+  mem_addr_t  loop4_B_mem_addr;
+  mem_addr_t  loop4_C_mem_addr;
+  mem_addr_t  loop4_D_mem_addr;
+
+  // global constants
+  sp_row_t    GBL_B_SP_ROW_ADDR_1;
+  sp_row_t    GBL_B_SP_ROW_ADDR_2;
+
+  tile_t      TILE_COLS_PER_GROUP;
+  tile_t      TILE_COL_END;
+  tile_t      TILE_ROWS_PER_GROUP;
+  tile_t      TILE_ROW_END;
+  tile_t      K_TILE_COL_END;
+
+  mem_addr_t  A_MEM_ADDR;
+  mem_addr_t  B_MEM_ADDR;
+  mem_addr_t  C_MEM_ADDR;
+  mem_addr_t  D_MEM_ADDR;
+  size_t      A_BYTES_PER_TILE_ROW;
+  size_t      B_BYTES_PER_TILE_ROW;
+  size_t      C_BYTES_PER_TILE_ROW;
+  size_t      D_BYTES_PER_TILE_ROW;
+  size_t      A_BYTES_PER_ROW;
+  size_t      B_BYTES_PER_ROW;
+  size_t      C_BYTES_PER_ROW;
+  size_t      D_BYTES_PER_ROW;
+
+  bool        HAS_BIAS;
+  bool        REPEATING_BIAS;
+
+  size_t      I_BYTE_COLS_PER_GROUP; //input byte width of group
+  size_t      O_BYTE_COLS_PER_GROUP;
+  size_t      I_TILE_BYTE_WIDTH;
+  size_t      O_TILE_BYTE_WIDTH;
+  size_t      TILE_BYTE_WIDTH;
+  size_t      BYTE_ROWS_PER_TILE;
+
 } gemmini_t;
 
 //============================================================================
@@ -24,15 +102,6 @@ gemmini_t* create_gemmini(size_t M, size_t N, size_t K,
   // C is accumulated, which is why it starts with 0b11
   const uint32_t D_sp_addr_start = 1 << (ADDR_LEN-1);
   const uint32_t C_sp_addr_start = 3 << (ADDR_LEN-2);
-
-  // TODO: deal with non-repeated, and repeated_bias rows in D
-  const acc_t * pre;
-  if (k0 != 0) {
-    pre = NULL;
-  } else {
-    size_t bias_row = repeating_bias ? 0 : i0*tile_I*DIM;
-    pre = &((acc_t (*)[dim_J])D)[bias_row][j0*tile_J*DIM];
-  }
 
 
   const size_t tile_rows    = DIM;
@@ -256,20 +325,21 @@ bool next_output_group(gemmini_t *self) {
 
   // update all derived pointers to matrices in memory
   if(did_row_incr) {
-    self->loop1_A_mem_addr += self->A_BYTES_PER_OG_ROW;
+    self->loop1_A_mem_addr  = self->A_MEM_ADDR + (self->loop1_tile_row_start *
+                              self->A_BYTES_PER_TILE_ROW);
     self->loop1_B_mem_addr  = self->B_MEM_ADDR;
-    self->loop1_C_mem_addr  = self->C_MEM_ADDR + (self->loop1_tile_col_start *
+    self->loop1_C_mem_addr  = self->C_MEM_ADDR + (self->loop1_tile_row_start *
                               self->C_BYTES_PER_TILE_ROW);
     self->loop1_D_mem_addr  = !self->HAS_BIAS ? NULL :
                               (self->HAS_REPEATING_BIAS ? self->D_MEM_ADDR :
-                               self->D_MEM_ADDR + (self->loop1_tile_col_start *
+                               self->D_MEM_ADDR + (self->loop1_tile_row_start *
                                self->D_BYTES_PER_TILE_ROW);
   } else if(did_col_incr) {
     self->loop1_A_mem_addr += 0;
     self->loop1_B_mem_addr += self->I_BYTE_COLS_PER_GROUP;
     self->loop1_C_mem_addr += self->I_BYTE_COLS_PER_GROUP;
     self->loop1_D_mem_addr += !self->HAS_BIAS ? 0 : 
-                              self->0_BYTE_COLS_PER_GROUP;
+                              self->O_BYTE_COLS_PER_GROUP;
   }
 
   return true;
@@ -292,7 +362,7 @@ void reset_A_tile_subcol(gemmini_t *self) {
 }
 
 bool next_A_tile_subcol(gemmini_t *self) {
-  if(self->loop2_k_tile_col == self->K_TILE_SUBCOL_END) {
+  if(self->loop2_k_tile_col == self->K_TILE_COL_END) {
     // we just accumulated the last A-column into the output-group. were done
     return;
   }
