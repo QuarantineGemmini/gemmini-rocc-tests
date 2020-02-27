@@ -804,12 +804,14 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 //       while expanding the bit-width automatically if needed
 //       SOLUTION: you can load D straight into accumulator already. the
 //       input D matrix has element-sizes of acc_t!!
-// TODO: when accumulator writes out, write out in size of elem_t, not acc_t
+// DONE: when accumulator writes out, write out in size of elem_t, not acc_t
+//    
 //
 // other TODO's
 // TODO: should we enable bias D-matrices with element size of elem_t instead
 //       of acc_t? the bias matrix would be smaller, but then we wouldn't
 //       be able to load it into the accumulator
+// TODO: when accumulator writes out, write out in size of elem_t, not acc_t
 // TODO: in our gemmini-hardware-tiler,
 //       create a config insn to set C addr in acc without also preloading 
 //       B into array. this causes uneccesary data-movement through array
