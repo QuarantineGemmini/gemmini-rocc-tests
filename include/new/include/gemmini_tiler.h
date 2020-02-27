@@ -190,334 +190,136 @@ void load_next_B_tile_into_sp(gemmini_t *self) {
 }
 
 //============================================================================
-// Tiling Loop #1: helpers
+// Tiling Loop #1 subroutines
 //============================================================================
 void reset_output_group(gemmini_t *self) {
-  // primary output-group counters
-  self->cur_og_tile_row_start  = 0; 
-  self->cur_og_tile_row_end    = self->TIL_ROWS_PER_GROUP - 1;
-  self->cur_og_tile_col_start  = 0;
-  self->cur_og_tile_col_end    = self->TIL_COLS_PER_GROUP - 1;
-  self->cur_og_tile_index      = 0;
-  self->cur_og_tile_row_offset = 0;
-  self->cur_og_tile_col_offset = 0;
-  self->cur_k_subcol           = 0;
+  // define mutable global state mutable by all loops, persist across all ogs
+  self->gbl_tile_row          = 0;
+  self->gbl_tile_col          = 0;
+  self->gbl_B_cur_sp_row_addr = self->GBL_B_SP_ROW_ADDR_1;
+  self->gbl_B_alt_sp_row_addr = self->GBL_B_SP_ROW_ADDR_2;
 
-  // maybe trim group-width if we are in last og in an og row
-  if(self->cur_og_tile_col_end >= self->C_TILE_WIDTH) {
-    self->cur_og_tile_col_end = self->C_TILE_WIDTH - 1;
-    ASSERT(self->cur_og_tile_col_end >= 0, 
-      "self->cur_og_tile_col_end == %d", self->cur_og_tile_col_end);
-  }
-  
-  // maybe trim group-height if we are in the last og-row
-  if(self->cur_og_tile_row_end >= self->C_TILE_HEIGHT) {
-    self->cur_og_tile_row_end = self->C_TILE_HEIGHT - 1;
-    ASSERT(self->cur_og_tile_row_end >= 0, 
-      "self->cur_og_tile_row_end == %d", self->cur_og_tile_row_end);
-  }
+  // define mutable global state mutable by all loops, reset after each og
+  self->gbl_C_acc_row_addr = 0;
+  self->gbl_D_acc_row_addr = 0;
 
-  //--------------------------------------------------------------------------
-  // derived pointers to matrices in memory
-  //--------------------------------------------------------------------------
-  self->cur_A_og_mem_start = self->A_MEM_ADDR;
-  self->cur_B_og_mem_start = self->B_MEM_ADDR;
-  self->cur_C_og_mem_start = self->C_MEM_ADDR;
-  self->cur_D_og_mem_start = self->D_MEM_ADDR;
+  // update the start/end tiles for this output-group (inclusive)
+  // NOTE: duplicated with next_output_group!!
+  self->loop1_tile_col_start = self->gbl_tile_col;
+  self->loop1_tile_col_end   = min(self->gbl_tile_col + 
+                                   self->TILE_COLS_PER_GROUP - 1,
+                                   self->TILE_COL_END);
+  self->loop1_tile_row_start = self->gbl_tile_row;
+  self->loop1_tile_row_end   = min(self->gbl_tile_row + 
+                                   self->TILE_ROWS_PER_GROUP - 1,
+                                   self->TILE_ROW_END);
 
-  self->cur_accumulating   = 0;
-  self->cur_B_tile_sp_addr = self->SP_ROWS - self->BYTE_ROWS_PER_TILE;
-  self->nxt_B_tile_sp_addr = self->cur_B_tile_sp_addr - 
-                             self->BYTE_ROWS_PER_TILE;
+  // derived pointers to matrices in memory for this og
+  self->loop1_A_mem_addr = self->A_MEM_ADDR;
+  self->loop1_B_mem_addr = self->B_MEM_ADDR;
+  self->loop1_C_mem_addr = self->C_MEM_ADDR;
+  self->loop1_D_mem_addr = self->D_MEM_ADDR;
 }
 
-bool next_output_group_counters(gemmini_t *self) {
-  // returns true if we successfully updated the output group 
- 
-  //--------------------------------------------------------------------------
-  // calculate the tile (x,y) of the top-left and bottom right of the next og
-  //--------------------------------------------------------------------------
-  int32_t next_og_tile_row_start = self->cur_og_tile_row_start;
-  int32_t next_og_tile_row_end   = self->cur_og_tile_row_end;
-  int32_t next_og_tile_col_start = self->cur_og_tile_col_end + 1;
-  int32_t next_og_tile_col_end   = self->cur_og_tile_col_end + 
-                                   self->TILE_COLS_PER_GROUP;
+bool next_output_group(gemmini_t *self) {
+  bool did_row_incr = false;
+  bool did_col_incr = false;
 
-  // wrap tile-group to the next row if needed
-  if(next_og_tile_col_start >= self->C_TILE_WIDTH) {
-    next_og_tile_row_start = self->cur_og_tile_row_end + 1;
-    next_og_tile_row_end   = self->cur_og_tile_row_end
-                             self->TILE_ROWS_PER_GROUP;
-    next_og_tile_col_start = 0;
-    next_og_tile_col_end   = self->TILE_COLS_PER_GROUP - 1;
+  if(self->gbl_tile_col == self->TILE_COL_END) {
+    if(self->gbl_tile_row == self->TILE_ROW_END) {
+      // we finished the last output group. so we're done
+      return;
+    } else {
+      self->gbl_tile_col = 0;
+      self->gbl_tile_row += 1;
+      did_row_incr = true;
+    }
+  } else {
+    self->gbl_tile_col += 1;
+    self->gbl_tile_row -= self->TILE_ROWS_PER_GROUP;
+    did_col_incr = true;
   }
 
-  // maybe trim group-width if we are in last og in an og row
-  if(next_og_tile_col_end >= self->C_TILE_WIDTH) {
-    next_og_tile_col_end = self->C_TILE_WIDTH - 1;
-    ASSERT(next_og_tile_col_end >= 0, 
-      "next_og_tile_col_end == %d", next_og_tile_col_end);
-  }
+  // reset global state that resets for each new output-group
+  self->gbl_C_acc_row_addr = 0;
+  self->gbl_D_acc_row_addr = 0;
 
-  if(next_of_tile_row_start >= self->C_TILE_HEIGHT) {
-    // we are done, finished all output-groups
-    return false;
-  }
-  
-  // maybe trim group-height if we are in the last og-row
-  if(next_of_tile_row_end >= self->C_TILE_HEIGHT) {
-    next_og_tile_row_end = self->C_TILE_HEIGHT - 1;
-    ASSERT(next_og_tile_row_end >= 0, 
-      "next_og_tile_row_end == %d", next_og_tile_row_end);
-  }
+  // update the start/end tiles for this output-group (inclusive)
+  self->loop1_tile_col_start = self->gbl_tile_col;
+  self->loop1_tile_col_end   = min(self->gbl_tile_col + 
+                                   self->TILE_COLS_PER_GROUP - 1,
+                                   self->TILE_COL_END);
+  self->loop1_tile_row_start = self->gbl_tile_row;
+  self->loop1_tile_row_end   = min(self->gbl_tile_row + 
+                                   self->TILE_ROWS_PER_GROUP - 1,
+                                   self->TILE_ROW_END);
 
-  bool did_row_incr = next_og_tile_row_start != self->cur_og_tile_row_start;
-  bool did_col_incr = next_og_tile_col_start != self->cur_og_tile_col_start;
-
-  //--------------------------------------------------------------------------
   // update all derived pointers to matrices in memory
-  //--------------------------------------------------------------------------
   if(did_row_incr) {
-    self->cur_A_og_mem_start += self->A_INCR_OG_ROW_BYTES;
-    self->cur_B_og_mem_start  = self->B_MEM_ADDR;
-    self->cur_C_og_mem_start += self->C_INCR_OG_ROW_BYTES;
-    self->cur_D_og_mem_start  = !self->HAS_BIAS ? NULL :
-                                 self->HAS_REPEATING_BIAS ? self->D_MEM_ADDR :
-                                   self->cur_D_og_mem_start + 
-                                   self->D_INCR_OG_ROW_BYTES;
-  } 
-  else if(did_col_incr) {
-    self->cur_A_og_mem_start += 0;
-    self->cur_B_og_mem_start += self->OG_BYTE_WIDTH;
-    self->cur_C_og_mem_start += self->OG_BYTE_WIDTH;
-    self->cur_D_og_mem_start += self->OG_BYTE_WIDTH;
+    self->loop1_A_mem_addr += self->A_BYTES_PER_OG_ROW;
+    self->loop1_B_mem_addr  = self->B_MEM_ADDR;
+    self->loop1_C_mem_addr  = self->C_MEM_ADDR + (self->loop1_tile_col_start *
+                              self->C_BYTES_PER_TILE_ROW);
+    self->loop1_D_mem_addr  = !self->HAS_BIAS ? NULL :
+                              (self->HAS_REPEATING_BIAS ? self->D_MEM_ADDR :
+                               self->D_MEM_ADDR + (self->loop1_tile_col_start *
+                               self->D_BYTES_PER_TILE_ROW);
+  } else if(did_col_incr) {
+    self->loop1_A_mem_addr += 0;
+    self->loop1_B_mem_addr += self->I_BYTE_COLS_PER_GROUP;
+    self->loop1_C_mem_addr += self->I_BYTE_COLS_PER_GROUP;
+    self->loop1_D_mem_addr += !self->HAS_BIAS ? 0 : 
+                              self->0_BYTE_COLS_PER_GROUP;
   }
-
-  // scratchpad and accumulor configs
-  self->cur_accumulating   = 0;
-  self->cur_B_tile_sp_addr = self->cur_B_tile_sp_addr; // don't swap!
-  self->nxt_B_tile_sp_addr = self->nxt_B_tile_sp_addr; // don't swap!
-
-  //--------------------------------------------------------------------------
-  // finish updating the output group
-  //--------------------------------------------------------------------------
-  // locally-modifiable state defined at this loop level
-  self->loop1_tile_row_start   = next_og_tile_row_start;
-  self->loop1_tile_row_end     = next_og_tile_row_end;
-  self->loop1_tile_col_start   = next_og_tile_col_start;
-  self->loop1_tile_col_end     = next_og_tile_col_end;
-
-  // globally-modifiable state defined at this loop level
-  self->gbl_tile_index = 0;
-  self->gbl_tile_row   = 0;
-  self->gbl_tile_col   = 0;
 
   return true;
 }
 
 //============================================================================
-// Tiling Loop #2: accumulate 1 output-group partial sum in the accumulators
-//============================================================================
-void reset_A_tile_subcol_counters(gemmini_t *self) {
-  self->og_cur_k_subcol = 0;
-}
-
-void reset_A_tile_subcol_counters(gemmini_t *self) {
-  self->og_cur_k_subcol = 0;
-}
-
-void reset_B_tile_subcol_in_subrow_counters(gemmini_t *self) {
-  self->cur_og_col_row_offset = 0;
-  self->cur_B_mem_start = self->cur_og_B_start_byte + 
-                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
-  self->cur_C_mem_start = self->cur_og_C_start_byte + 
-                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
-  self->cur_D_mem_start = self->cur_og_D_start_byte + 
-                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
-}
-
-void reset_A_tile_subrow_in_subcol_counters(gemmini_t *self) {
-  self->cur_og_tile_row_offset = 0;
-  self->cur_A_mem_start = self->cur_og_A_start_byte + 
-                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
-}
-
-void incr_A_tile_subrow_in_subcol_counters(gemmini_t *self) {
-  self->cur_og_tile_row_offset = 0;
-
-
-}
-
-void load_D_tile_into_sp(gemmini_t *self) {
-  // only load D into spad if we are using a bias
-  if (self->USE_D_MATRIX) {
-    const size_t D_tile_row = self->cur_og_tile_row_offset;
-    const size_t D_tile_col = self->cur_og_tile_col_offset;
-    const size_t mem_start = self->og_D_offset + 
-                             (D_tile_row * 
-                              self->BYTE_ROWS_PER_TILE * self->D_BYTE_WIDTH) +
-                             (D_tile_col * self->TILE_BYTE_WIDTH);
-    const size_t mem_stride = self->repeating_bias ? 0 : self->D_BYTE_WIDTH;
-    const size_t acc_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
-  const size_t sp_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
-    if (D != NULL && !no_bias) {
-      // see sp_tiled_matmul_ws
-    }
-  }
-}
-
-void load_A_tile_into_sp(gemmini_t *self) {
-  // calculate mvin parameters
-  const size_t A_tile_row = (next_B_tile_col == 0) ?
-                             (self->og_cur_tile_row_offset + 1) : 0;
-  const size_t A_tile_col = (self->og_cur_tile_col_offset + 1) %
-                             self->og_tile_cols;
-
-  const size_t mem_start = self->og_A_offset + 
-                           (A_tile_row * 
-                            self->BYTE_ROWS_PER_TILE * self->A_BYTE_WIDTH) +
-                           (A_tile_col * self->TILE_BYTE_WIDTH);
-  const size_t mem_stride = self->A_BYTE_WIDTH;
-  const size_t sp_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
-
-  // issue gemmini commands
-  gemmini_config_ld(mem_stride);
-  gemmini_mvin(mem_start, sp_start);
-}
-
-void store_C_tile_into_mem(gemmini_t *self) {
-  // calculate mvout parameters
-  const size_t C_tile_row = self->og_cur_tile_row_offset;
-  const size_t C_tile_col = self->og_cur_tile_col_offset;
-  const size_t mem_start = self->og_C_offset + 
-                           (C_tile_row * 
-                            self->BYTE_ROWS_PER_TILE * self->C_BYTE_WIDTH) +
-                           (C_tile_col * self->TILE_BYTE_WIDTH);
-  const size_t mem_stride = self->C_BYTE_WIDTH;
-  const size_t sp_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
-
-  // issue gemmini commands
-  gemmini_config_st(mem_stride);
-  gemmini_mvout(mem_start, sp_start);
-}
-
-//============================================================================
-// ...
-//============================================================================
-
-void is_A_at_last_subcol(gemmini_t *self) {
-  return self->og_cur_tile_col_offset == self->;
-  return self->og_cur_tile_row_offset == self->og_end_tile_row;
-}
-
-void is_B_at_first_subcol_in_subrow(gemmini_t *self) {
-  return self->og_cur_tile_col_offset == 0;
-}
-
-void load_A_tile_into_sp(gemmini_t *self) {
-  const size_t mem_start = self->A_addr + 
-      (self->og_start_tile_row + self->og_cur_tile_row_offset) *
-        self->ROWS_PER_TILE * self->A_WIDTH_B +
-      (self->og_cur_tile_k_index * 
-        self->ROWS_PER_TILE * self->TILE_WIDTH_B);
-
-  const size_t mem_stride = self->A_WIDTH_B;
-
-  const size_t A_bank_num = self->og_cur_tile_row_offset % self->NUM_SP_BANK;
-  const size_t A_bank_row = (self->og_cur_tile_row_offset / 
-                             self->TILES_PER_BANK) * self->ROWS_PER_TILE;
-  const size_t A_sp_addr = (A_bank_num * self->ROWS_PER_SP_BANK) + A_bank_row;
-
-  gemmini_config_ld(mem_stride);
-  gemmini_mvin(mem_start, sp_start);
-}
-
-void matmul_into_accum(gemmini_t *self) {
-  const size_t A_bank_num = self->og_cur_tile_row_offset % self->NUM_SP_BANK;
-  const size_t A_bank_row = (self->og_cur_tile_row_offset / 
-                             self->TILES_PER_BANK) * self->ROWS_PER_TILE;
-  const size_t A_addr = (A_bank_num * self->ROWS_PER_SP_BANK) + A_bank_row;
-
-  gemmini_compute_accumulated(A_addr, GARBAGE_ADDR);
-}
-
-void store_C_tile_into_mem(gemmini_t *self) {
-  const size_t mem_start = self->C_addr + 
-      (self->og_start_tile_row + self->og_cur_tile_row_offset) *
-        self->ROWS_PER_TILE * self->C_WIDTH_B +
-      (self->og_start_tile_col + self->og_cur_tile_col_offset) *
-          self->ROWS_PER_TILE * self->TILE_WIDTH_B;
-
-  const size_t mem_stride = self->C_WIDTH_B;
-
-  const size_t sp_start = 
-    ACC_ADDR_RD(self->og_cur_tile_index * self->ROWS_PER_TILE);
-
-  gemmini_config_st(mem_stride);
-  gemmini_mvout(mem_start, sp_start);
-}
-
-
-// 2-D array coordinates: upper-left is (0,0), and lower-right is (M,N)
-void incr_output_group(gemmini_t *self) {
-  const size_t next_og_row = self->og_index / self->OG_ROW_MAX;
-  const size_t next_og_col = self->og_index / self->OG_COL_MAX;
-  self->og_index += 1;
-
-  // x,y location of output-group in output-group 2-D map
-  self->og_row = next_og_row;
-  self->og_col = next_og_col;
-
-  // the x,y location of the upper-left tile in the output-group
-  self->og_start_tile_col = next_og_col * self->OG_TILE_WIDTH;
-  self->og_start_tile_row = next_og_row * self->OG_TILE_HEIGHT;
-
-  // the x,y location of the lower-right tile in the output-group
-  self->og_end_tile_col = (self->og_col < (self->OG_COL_MAX - 1))
-                        ? (self->og_start_tile_col + self->OG_TILE_WIDTH - 1)
-                        : (self->OM_TILE_COLS - 1);
-
-  self->og_end_tile_row = (self->og_row < (self->OG_ROW_MAX - 1))
-                        ? (self->og_start_tile_row + self->OG_TILE_HEIGHT - 1)
-                        : (self->OM_TILE_ROWS - 1);
-}
-
-//============================================================================
-// Tiling Loop #2: accumulate 1 iteration of all tiles in an output group
+// Tiling Loop #2 subroutines
 //============================================================================
 
 void reset_A_tile_subcol(gemmini_t *self) {
-  // update this loop's variables that are not mutated by other loop levels
-  self->loop2_k_tile_subcol     = 0;
-  self->loop2_use_accumulators  = 0;
-  self->loop2_A_mem_start       = self->loop1_A_mem_start;
-  self->loop2_B_mem_start       = self->loop1_B_mem_start;
+  // this scope modifies: self->gbl_B_cur_sp_row_addr;
+  //                      self->gbl_B_alt_sp_row_addr;
+  
+  self->loop2_k_tile_col = 0;
 
-  // update shared variables that are mutated by all loop levels. need to 
-  // update the cur/alt ptrs because move_first_b_tile_into_sp will write
-  // to the 'cur' addr right after this
-  self->gbl_B_cur_sp_addr = self->gbl_B_alt_sp_addr;
-  self->gbl_B_alt_sp_addr = self->gbl_B_cur_sp_addr;
+  self->loop2_A_mem_addr = self->loop1_A_mem_addr;
+  self->loop2_B_mem_addr = self->loop1_B_mem_addr;
+  self->loop2_C_mem_addr = self->loop1_C_mem_addr;
+  self->loop2_D_mem_addr = self->loop1_D_mem_addr;
 }
 
 bool next_A_tile_subcol(gemmini_t *self) {
-  self->loop2_k_tile_subcol    += 1;
-  self->loop2_use_accumulators  = 1;
-  self->loop2_A_mem_start      += self->TILE_BYTE_WIDTH;
-  self->loop2_B_mem_start      += self->B_BYTES_PER_TILE_ROW;
+  if(self->loop2_k_tile_col == self->K_TILE_SUBCOL_END) {
+    // we just accumulated the last A-column into the output-group. were done
+    return;
+  }
+  self->loop2_k_tile_col += 1;
 
-  return self->loop2_k_tile_subcol != self->MAX_K_TILE_SUBCOL;
+  self->loop2_A_mem_addr += self->TILE_BYTE_WIDTH;
+  self->loop2_B_mem_addr += self->B_BYTES_PER_TILE_ROW;
+  self->loop2_C_mem_addr += 0;
+  self->loop2_D_mem_addr += 0;
+
+  // swap current/alternate B-tile scratchpad addrs
+  const size_t tmp_B_sp_row_addr = self->gbl_B_cur_sp_row_addr;
+  self->gbl_B_cur_sp_row_addr    = self->gbl_B_alt_sp_row_addr;
+  self->gbl_B_alt_sp_row_addr    = tmp_B_sp_row_addr;
+
+  return true;
 }
 
 void move_first_B_tile_into_sp(gemmini_t *self) {
   // calculate mvin parameters
-  const size_t mem_start  = self->loop2_B_mem_start;
-  const size_t mem_stride = self->B_BYTE_WIDTH;
-  const size_t sp_start   = self->loop2_alt_sp_addr;
+  const size_t B_mem_addr    = self->loop2_B_mem_addr;
+  const size_t B_mem_stride  = self->B_BYTES_PER_ROW;
+  const size_t B_sp_row_addr = self->gbl_B_cur_sp_row_addr;
 
   // issue gemmini commands
-  gemmini_config_ld(mem_stride);
-  gemmini_mvin(mem_start, sp_start);
+  gemmini_config_ld(B_mem_stride);
+  gemmini_mvin(B_mem_addr, B_sp_row_addr);
 }
 
 //============================================================================
