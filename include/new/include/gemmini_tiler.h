@@ -167,21 +167,6 @@ void is_first_B_tile_subrow(gemmini_t *self) {
   return self->og_cur_tile_row_offset == 0;
 }
 
-void load_first_B_tile_into_sp(gemmini_t *self) {
-  // calculate mvin parameters
-  const size_t mem_start  = self->og_B_offset;
-  const size_t mem_stride = self->B_BYTE_WIDTH;
-  const size_t sp_start   = self->ROWS_PER_SP - (self->ROWS_PER_TILE * 
-                            (1 + self->og_cur_B_tile_sp_index));
-
-  // issue gemmini commands
-  gemmini_config_ld(mem_stride);
-  gemmini_mvin(mem_start, sp_start);
-
-  // update state
-  self->og_cur_B_tile_sp_start = sp_start;
-}
-
 //===========================================================================
 // Tiling Loop #3: Helpers
 //===========================================================================
@@ -584,14 +569,21 @@ void begin_initial_weight_row(struct Gemmini* self) {
   gemmini_config_ld();
 
 //============================================================================
-// Tiling Loop #2: accumulate 1 output-group partial sum in the accumulators
+// Tiling Loop #2: accumulate 1 iteration of all tiles in an output group
 //============================================================================
 
 void reset_A_tile_subcol(gemmini_t *self) {
+  // update this loop's variables that are not mutated by other loop levels
   self->loop2_k_tile_subcol     = 0;
   self->loop2_use_accumulators  = 0;
   self->loop2_A_mem_start       = self->loop1_A_mem_start;
   self->loop2_B_mem_start       = self->loop1_B_mem_start;
+
+  // update shared variables that are mutated by all loop levels. need to 
+  // update the cur/alt ptrs because move_first_b_tile_into_sp will write
+  // to the 'cur' addr right after this
+  self->gbl_B_cur_sp_addr = self->gbl_B_alt_sp_addr;
+  self->gbl_B_alt_sp_addr = self->gbl_B_cur_sp_addr;
 }
 
 bool next_A_tile_subcol(gemmini_t *self) {
@@ -600,16 +592,24 @@ bool next_A_tile_subcol(gemmini_t *self) {
   self->loop2_A_mem_start      += self->TILE_BYTE_WIDTH;
   self->loop2_B_mem_start      += self->B_BYTES_PER_TILE_ROW;
 
-  if (self->loop2_k_tile_subcol == self->MAX_K_TILE_SUBCOL) {
-    return false;
-  }
+  return self->loop2_k_tile_subcol != self->MAX_K_TILE_SUBCOL;
+}
 
-  return true;
+void move_first_B_tile_into_sp(gemmini_t *self) {
+  // calculate mvin parameters
+  const size_t mem_start  = self->loop2_B_mem_start;
+  const size_t mem_stride = self->B_BYTE_WIDTH;
+  const size_t sp_start   = self->loop2_alt_sp_addr;
+
+  // issue gemmini commands
+  gemmini_config_ld(mem_stride);
+  gemmini_mvin(mem_start, sp_start);
 }
 
 //============================================================================
-// Tiling Loop #3
+// Tiling Loop #3: accumulate 1 iteration of a column within an output group
 //============================================================================
+
 void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
   self->loop3_group_tile_col  = self->loop1_group_tile_col_start;
   self->loop3_B_cur_sp_addr   = self->loop1_B_cur_sp_addr;
@@ -617,6 +617,11 @@ void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
   self->loop3_B_mem_start     = self->loop1_B_mem_start;
   self->loop3_C_mem_start     = self->loop1_C_mem_start;
   self->loop3_D_mem_start     = self->loop1_D_mem_start;
+
+  // see note in reset_A_tile_subcol
+  self->gbl_B_cur_sp_addr = self->gbl_B_alt_sp_addr;
+  self->gbl_B_alt_sp_addr = self->gbl_B_cur_sp_addr;
+
 }
 
 bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
@@ -628,32 +633,34 @@ bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
   self->loop3_C_mem_start    += self->TILE_BYTE_WIDTH;
   self->loop3_D_mem_start    += self->TILE_BYTE_WIDTH;
 
-  if(self->loop3_group_tile_col == self->loop1_group_tile_col_end) {
-    // reached the end of the 3rd nested loop
-    return false;
-  }
+  // see note in reset_A_tile_subcol
+  self->gbl_B_cur_sp_addr = self->gbl_B_alt_sp_addr;
+  self->gbl_B_alt_sp_addr = self->gbl_B_cur_sp_addr;
 
-  //--------------------------------------------------------------------------
-  // preload B tile from scratchpad to systolic array
-  //--------------------------------------------------------------------------
-  preload_B_tile_into_array(self);
-
-  // did not reach the end of the 3rd nested loop
-  return true;
+  return self->loop3_group_tile_col != self->loop1_group_tile_col_end;
 }
 
-void incr_B_tile_subcol_in_subrow(gemmini_t *self) {
-  // update the new row index for this output-group
-  self->og_cur_tile_row_offset = self->og_cur_tile_row_offset_next;
+// TODO: in our gemmini-hardware-tiler,
+//       create a config insn to set C addr in acc without also preloading 
+//       B into array. this causes uneccesary data-movement through array
+//       when we just want to set a new C-addr for a new insn
+//
+// TODO: investigate: if I call preload 10 times in a row, will they just
+//       overwrite the same flops in the systolic-array? so when i call
+//       matmul.compute.preloaded, it loads the last one i preload()ed?
+//       This would be IDEAL.
+void preload_B_tile_into_array(gemmini_t *self) {
+  // calculate preload parameters
+  const size_t B_sp_start = self->gbl_B_cur_sp_ptr;
+  const size_t C_sp_start = self->loop2_use_accumulators ? 
+                            ACC_ADDR_ACC(self->loop3_C_mem_start) :
+                            ACC_ADDR_NEW(self->loop3_C_mem_start);
+  // issue gemmini commands
+  gemmini_preload(B_sp_start, C_sp_start);
+}
 
-  // now perform any actions 
-  self->preload_B_tile_into_array(self);
-  if(!(self->is_last_tile_subrow(self) || self->is_last_tile_subcol(self))) {
-    self->load_next_B_tile_into_sp(self);
-  }
+void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
 
-  // update the next row index for this output-group
-  self->og_cur_tile_row_offset_next += 1;
 }
 
 //============================================================================
@@ -696,6 +703,18 @@ void incr_A_tile_subrow_in_subcol(gemmini_t *self) {
   // update the next subrow-index for this output-group
   self->og_cur_tile_row_offset_next += 1;
 }
+
+void set_C_tile_addr_in_sp(gemmini_t *self) {
+  // calculate preload parameters
+  const size_t B_sp_start = self->gbl_B_cur_sp_ptr;
+  const size_t C_sp_start = self->loop2_use_accumulators ? 
+                            ACC_ADDR_ACC(self->loop3_C_mem_start) :
+                            ACC_ADDR_NEW(self->loop3_C_mem_start);
+  // issue gemmini commands
+  gemmini_preload(B_sp_start, C_sp_start);
+}
+
+
 
 //============================================================================
 // Input Validation
@@ -787,6 +806,7 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         maybe_move_next_B_tile_into_sp(self);
         reset_A_tile_subrow_in_subcol(self);
         do {
+          set_C_tile_addr_in_sp(self);
           maybe_move_A_tile_into_sp(self);
           maybe_move_D_tile_into_sp(self);
           do_matmul(self);
