@@ -274,6 +274,7 @@ void reset_output_group(gemmini_t *self) {
 
   //--------------------------------------------------------------------------
   // derived pointers to matrices in memory
+  //--------------------------------------------------------------------------
   self->cur_A_og_mem_start = self->A_MEM_ADDR;
   self->cur_B_og_mem_start = self->B_MEM_ADDR;
   self->cur_C_og_mem_start = self->C_MEM_ADDR;
@@ -583,101 +584,62 @@ void begin_initial_weight_row(struct Gemmini* self) {
   gemmini_config_ld();
 
 //============================================================================
-// Tiling Loop #1: update output-group, a 2D tile-array within the C matrix
-//============================================================================
-void has_next_output_group(const gemmini_t *self) {
-  return self->og_index < (self->NUM_OUTPUT_GROUPS - 1);
-}
-
-void incr_output_group(gemmini_t *self) {
-  // set tile (x,y) coordinates of top-left tile in output-group
-  if((self->og_start_tile_col + self->TILE_COLS_PER_GROUP) >=
-      self->C_TILE_WIDTH) {
-    self->og_start_tile_col = 0;
-    self->og_start_tile_row += self->TILE_ROWS_PER_GROUP;
-  } else {
-    self->og_start_tile_col += self->TILE_COLS_PER_GROUP;
-  }
-
-  // how many tiles rows and cols are in this output-group 
-  self->og_tile_rows = min(self->TILE_ROWS_PER_GROUP,
-                           self->C_TILE_HEIGHT - self->og_start_tile_row);
-  self->og_tile_cols = min(self->TILE_COLS_PER_GROUP,
-                           self->C_TILE_WIDTH - self->og_start_tile_col);
-
-  // set tile (x,y) coordinates of bottom-right tile in output-group
-  self->og_end_tile_row = self->og_start_tile_row + self->og_tile_rows - 1;
-  self->og_end_tile_col = self->og_start_tile_col + self->og_tile_cols - 1;
-
-  // TODO: should these be C_BYTE_WIDTH or C_ELEM_WIDTH?
-
-  // set top-left address of A, B, C, sub-matrices in memory
-  self->og_C_offset = (self->og_start_tile_row *
-                       self->BYTE_ROWS_PER_TILE * self->C_BYTE_WIDTH) +
-                      (self->og_start_tile_col * self->TILE_BYTE_WIDTH);
-  self->og_A_offset = (self->og_start_tile_row *
-                       self->BYTE_ROWS_PER_TILE * self->A_BYTE_WIDTH);
-  self->og_B_offset = (self->og_start_tile_col * self->TILE_BYTE_WIDTH);
-
-  if(bias) {
-    if(repeating bias) {
-      // set to first row offset
-    } else {
-      self->og_D_offset = (self->og_start_tile_row *
-                           self->BYTE_ROWS_PER_TILE * self->D_BYTE_WIDTH) +
-                          (self->og_start_tile_col * self->TILE_BYTE_WIDTH);
-    }
-  }
-
-  // reset the mulable pointers used by sub-loops
-  self->og_cur_tile_index       = 0;
-  self->og_cur_tile_col_offset  = 0;
-  self->og_cur_tile_row_offset  = 0;
-
-  self->og_cur_tile_k_index       = 0;
-  self->og_cur_tile_k_index_next  = 0;
-
-  // 0 == accumulate with exisitng partial sums, 1 == first partial sum
-  self->og_use_accumulators       = 0;
-
-  // alternate between 0 and 1. the last 2 tile slots in scratchpad are 
-  // reserved for prefetching the next B-tile into the array.
-  self->og_cur_B_tile_sp_index = 0;
-
-  // update the next output-group's index
-  self->og_index += 1;
-}
-
-//============================================================================
 // Tiling Loop #2: accumulate 1 output-group partial sum in the accumulators
 //============================================================================
-void has_next_A_tile_subcol(gemmini_t *self) {
-  return self->og_cur_tile_k_index_next < self->A_TILE_WIDTH;
+
+void reset_A_tile_subcol(gemmini_t *self) {
+  self->loop2_k_tile_subcol     = 0;
+  self->loop2_use_accumulators  = 0;
+  self->loop2_A_mem_start       = self->loop1_A_mem_start;
+  self->loop2_B_mem_start       = self->loop1_B_mem_start;
 }
 
-void incr_A_tile_subcol(gemmini_t *self) {
-  // update the new K index for this output-group
-  self->og_cur_tile_k_index = self->og_cur_tile_k_index_next;
+bool next_A_tile_subcol(gemmini_t *self) {
+  self->loop2_k_tile_subcol    += 1;
+  self->loop2_use_accumulators  = 1;
+  self->loop2_A_mem_start      += self->TILE_BYTE_WIDTH;
+  self->loop2_B_mem_start      += self->B_BYTES_PER_TILE_ROW;
 
-  // now perform any actions 
-  if(is_first_A_tile_subcol(self)) {
-    reset_accumulators(self);
-  } else {
-    use_accumulators(self);
-  }
-  if(self->is_first_B_tile_subrow(self)) {
-    load_first_B_tile_into_sp(self);
+  if (self->loop2_k_tile_subcol == self->MAX_K_TILE_SUBCOL) {
+    return false;
   }
 
-  // update the next K index for this output-group
-  self->og_cur_tile_k_index_next += 1;
+  return true;
 }
 
 //============================================================================
 // Tiling Loop #3
 //============================================================================
-void has_next_B_tile_subcol_in_subrow(gemmini_t *self) {
-  return self->og_cur_tile_col_offset < (self->og_tile_cols - 1);
+void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
+  self->loop3_group_tile_col  = self->loop1_group_tile_col_start;
+  self->loop3_B_cur_sp_addr   = self->loop1_B_cur_sp_addr;
+  self->loop3_B_alt_sp_addr   = self->loop1_B_alt_sp_addr;
+  self->loop3_B_mem_start     = self->loop1_B_mem_start;
+  self->loop3_C_mem_start     = self->loop1_C_mem_start;
+  self->loop3_D_mem_start     = self->loop1_D_mem_start;
+}
+
+bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
+  self->loop3_group_tile_col += 1;
+  self->loop3_B_cur_sp_addr   = self->loop1_B_cur_sp_addr;
+  self->loop3_B_alt_sp_addr   = self->loop1_B_alt_sp_addr;
+
+  self->loop3_B_mem_start    += self->TILE_BYTE_WIDTH;
+  self->loop3_C_mem_start    += self->TILE_BYTE_WIDTH;
+  self->loop3_D_mem_start    += self->TILE_BYTE_WIDTH;
+
+  if(self->loop3_group_tile_col == self->loop1_group_tile_col_end) {
+    // reached the end of the 3rd nested loop
+    return false;
+  }
+
+  //--------------------------------------------------------------------------
+  // preload B tile from scratchpad to systolic array
+  //--------------------------------------------------------------------------
+  preload_B_tile_into_array(self);
+
+  // did not reach the end of the 3rd nested loop
+  return true;
 }
 
 void incr_B_tile_subcol_in_subrow(gemmini_t *self) {
@@ -697,8 +659,20 @@ void incr_B_tile_subcol_in_subrow(gemmini_t *self) {
 //============================================================================
 // Tiling Loop #4
 //============================================================================
-void has_next_A_tile_subrow_in_subcol(gemmini_t *self) {
-  return self->og_cur_tile_row_offset < (self->og_tile_rows - 1);
+
+void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
+  // primary output-group counters
+  self->cur_og_tile_col_offset = 0;
+
+  //--------------------------------------------------------------------------
+  // derived pointers to matrices in memory
+  //--------------------------------------------------------------------------
+  self->cur_A_mem_start =  self->cur_A_og_mem_start + 
+                          (self->cur_og_tile_
+  self->cur_B_mem_start = self->B_MEM_ADDR;
+  self->cur_C_mem_start = self->C_MEM_ADDR;
+  self->cur_D_mem_start = self->D_MEM_ADDR;
+
 }
 
 void incr_A_tile_subrow_in_subcol(gemmini_t *self) {
@@ -806,12 +780,20 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
   do {
     reset_A_tile_subcol(self);
     do {
-      while(has_next_B_tile_subcol_in_subrow(self)) {
-        incr_B_tile_subcol(self);
-        while(has_next_A_tile_subrow_in_subcol(self)) {
-          incr_A_tile_subrow_in_subcol(self);
-        }
-      }
+      move_first_B_tile_into_sp(self);
+      reset_B_tile_subcol_in_subrow(self);
+      do {
+        preload_B_tile_into_array(self);
+        maybe_move_next_B_tile_into_sp(self);
+        reset_A_tile_subrow_in_subcol(self);
+        do {
+          maybe_move_A_tile_into_sp(self);
+          maybe_move_D_tile_into_sp(self);
+          do_matmul(self);
+          maybe_move_C_tile_into_mem(self);
+
+        } while(next_A_tile_subrow_in_subcol(self));
+      } while(next_B_tile_subcol_in_subrow(self));
     } while(next_A_tile_subcol(self));
   } while(next_output_group(self));
 
