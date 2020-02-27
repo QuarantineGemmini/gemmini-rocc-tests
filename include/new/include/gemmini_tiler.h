@@ -1,6 +1,8 @@
 #ifndef __GEMMINI_TILER_H__
 #define __GEMMINI_TILER_H__
 
+// - only use add, sub, compare operations. need to implement in hardware
+//   as next-state logic!
 
 // wieght-stationary semantics:
 //   perform_single_preload:
@@ -90,6 +92,13 @@ gemmini_t* create_gemmini(size_t M, size_t N, size_t K,
   const size_t sp_banks           = BANK_NUM;
   const size_t tiles_per_sp_bank  = BANK_ROWS / tile_rows;
   const size_t tiles_per_acc      = ACC_ROWS / tile_rows;
+
+  // configure the systolic array and accumulator
+  self->DATAFLOW                  = WEIGHT_STATIONARY;
+  self->ACTIVATION                = act;
+  self->SYSTOLIC_OUTPUT_RSHIFT    = 0;
+  self->ACCUMULATOR_OUTPUT_RSHIFT = shift;
+  self->RELU6_INPUT_LSHIFT        = 0;
 
   //==========================================================================
   // - the 2-D shape of tiles in the accumulator. This shape depends on the 
@@ -202,16 +211,14 @@ bool is_last_tile_subcol(gemmini_t *self) {
   return self->og_cur_tile_col_offset == (self->og_end_tile_col - 1);
 }
 
-bool is_k_last_tile_subcol(gemmini_t *self) {
-  // are we currently on the last k-subcol in the input A-matrix
-  return self->og_cur_tile_k_index == (self->A_TILE_WIDTH - 1);
-}
+bool is_on_first_k_subcol(gemmini_t *self) {
+  // are we currently on the first k-subcol in the input A-matrix
+  return self->og_cur_k_subcol_index == 0;
 
-void load_D_tile_into_sp(gemmini_t *self) {
-  gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, 0);
-  if (D != NULL && !no_bias) {
-    // see sp_tiled_matmul_ws
-  }
+bool is_on_last_k_subcol(gemmini_t *self) {
+  // are we currently on the last k-subcol in the input A-matrix
+  // return self->og_cur_tile_k_index == (self->A_TILE_WIDTH - 1);
+  return self->cur_k_subcol_index == self->max_k_subcol_index;
 }
 
 void load_next_B_tile_into_sp(gemmini_t *self) {
@@ -237,9 +244,179 @@ void load_next_B_tile_into_sp(gemmini_t *self) {
   self->og_cur_B_tile_sp_start = sp_start;
 }
 
-//===========================================================================
-// Tiling Loop #4: Helpers
-//===========================================================================
+//============================================================================
+// Tiling Loop #1: helpers
+//============================================================================
+void reset_output_group(gemmini_t *self) {
+  // primary output-group counters
+  self->cur_og_tile_row_start  = 0; 
+  self->cur_og_tile_row_end    = self->TIL_ROWS_PER_GROUP - 1;
+  self->cur_og_tile_col_start  = 0;
+  self->cur_og_tile_col_end    = self->TIL_COLS_PER_GROUP - 1;
+  self->cur_og_tile_index      = 0;
+  self->cur_og_tile_row_offset = 0;
+  self->cur_og_tile_col_offset = 0;
+  self->cur_k_subcol           = 0;
+
+  // maybe trim group-width if we are in last og in an og row
+  if(self->cur_og_tile_col_end >= self->C_TILE_WIDTH) {
+    self->cur_og_tile_col_end = self->C_TILE_WIDTH - 1;
+    ASSERT(self->cur_og_tile_col_end >= 0, 
+      "self->cur_og_tile_col_end == %d", self->cur_og_tile_col_end);
+  }
+  
+  // maybe trim group-height if we are in the last og-row
+  if(self->cur_og_tile_row_end >= self->C_TILE_HEIGHT) {
+    self->cur_og_tile_row_end = self->C_TILE_HEIGHT - 1;
+    ASSERT(self->cur_og_tile_row_end >= 0, 
+      "self->cur_og_tile_row_end == %d", self->cur_og_tile_row_end);
+  }
+
+  //--------------------------------------------------------------------------
+  // derived pointers to matrices in memory
+  self->cur_A_og_mem_start = self->A_MEM_ADDR;
+  self->cur_B_og_mem_start = self->B_MEM_ADDR;
+  self->cur_C_og_mem_start = self->C_MEM_ADDR;
+  self->cur_D_og_mem_start = self->D_MEM_ADDR;
+
+  self->cur_accumulating   = 0;
+  self->cur_B_tile_sp_addr = self->SP_ROWS - self->BYTE_ROWS_PER_TILE;
+  self->nxt_B_tile_sp_addr = self->cur_B_tile_sp_addr - 
+                             self->BYTE_ROWS_PER_TILE;
+}
+
+bool next_output_group_counters(gemmini_t *self) {
+  // returns true if we successfully updated the output group 
+ 
+  //--------------------------------------------------------------------------
+  // calculate the tile (x,y) of the top-left and bottom right of the next og
+  //--------------------------------------------------------------------------
+  int32_t next_og_tile_row_start = self->cur_og_tile_row_start;
+  int32_t next_og_tile_row_end   = self->cur_og_tile_row_end;
+  int32_t next_og_tile_col_start = self->cur_og_tile_col_end + 1;
+  int32_t next_og_tile_col_end   = self->cur_og_tile_col_end + 
+                                   self->TILE_COLS_PER_GROUP;
+
+  // wrap tile-group to the next row if needed
+  if(next_og_tile_col_start >= self->C_TILE_WIDTH) {
+    next_og_tile_row_start = self->cur_og_tile_row_end + 1;
+    next_og_tile_row_end   = self->cur_og_tile_row_end
+                             self->TILE_ROWS_PER_GROUP;
+    next_og_tile_col_start = 0;
+    next_og_tile_col_end   = self->TILE_COLS_PER_GROUP - 1;
+  }
+
+  // maybe trim group-width if we are in last og in an og row
+  if(next_og_tile_col_end >= self->C_TILE_WIDTH) {
+    next_og_tile_col_end = self->C_TILE_WIDTH - 1;
+    ASSERT(next_og_tile_col_end >= 0, 
+      "next_og_tile_col_end == %d", next_og_tile_col_end);
+  }
+
+  if(next_of_tile_row_start >= self->C_TILE_HEIGHT) {
+    // we are done, finished all output-groups
+    return false;
+  }
+  
+  // maybe trim group-height if we are in the last og-row
+  if(next_of_tile_row_end >= self->C_TILE_HEIGHT) {
+    next_og_tile_row_end = self->C_TILE_HEIGHT - 1;
+    ASSERT(next_og_tile_row_end >= 0, 
+      "next_og_tile_row_end == %d", next_og_tile_row_end);
+  }
+
+  bool did_row_incr = next_og_tile_row_start != self->cur_og_tile_row_start;
+  bool did_col_incr = next_og_tile_col_start != self->cur_og_tile_col_start;
+
+  //--------------------------------------------------------------------------
+  // update all derived pointers to matrices in memory
+  //--------------------------------------------------------------------------
+  if(did_row_incr) {
+    self->cur_A_og_mem_start += self->A_INCR_OG_ROW_BYTES;
+    self->cur_B_og_mem_start  = self->B_MEM_ADDR;
+    self->cur_C_og_mem_start += self->C_INCR_OG_ROW_BYTES;
+    self->cur_D_og_mem_start  = !self->HAS_BIAS ? NULL :
+                                 self->HAS_REPEATING_BIAS ? self->D_MEM_ADDR :
+                                   self->cur_D_og_mem_start + 
+                                   self->D_INCR_OG_ROW_BYTES;
+  } 
+  else if(did_col_incr) {
+    self->cur_A_og_mem_start += 0;
+    self->cur_B_og_mem_start += self->OG_BYTE_WIDTH;
+    self->cur_C_og_mem_start += self->OG_BYTE_WIDTH;
+    self->cur_D_og_mem_start += self->OG_BYTE_WIDTH;
+  }
+
+  // scratchpad and accumulor configs
+  self->cur_accumulating   = 0;
+  self->cur_B_tile_sp_addr = self->cur_B_tile_sp_addr; // don't swap!
+  self->nxt_B_tile_sp_addr = self->nxt_B_tile_sp_addr; // don't swap!
+
+  //--------------------------------------------------------------------------
+  // finish updating the output group
+  //--------------------------------------------------------------------------
+  self->cur_og_tile_row_start   = next_og_tile_row_start;
+  self->cur_og_tile_row_end     = next_og_tile_row_end;
+  self->cur_og_tile_col_start   = next_og_tile_col_start;
+  self->cur_og_tile_col_end     = next_og_tile_col_end;
+  self->cur_og_tile_index       = 0;
+  self->cur_og_tile_row_offset  = 0;
+  self->cur_og_tile_col_offset  = 0;
+  self->cur_k_subcol            = 0;
+
+  return true;
+}
+
+//============================================================================
+// Tiling Loop #2: accumulate 1 output-group partial sum in the accumulators
+//============================================================================
+void reset_A_tile_subcol_counters(gemmini_t *self) {
+  self->og_cur_k_subcol = 0;
+}
+
+void reset_A_tile_subcol_counters(gemmini_t *self) {
+  self->og_cur_k_subcol = 0;
+}
+
+void reset_B_tile_subcol_in_subrow_counters(gemmini_t *self) {
+  self->cur_og_col_row_offset = 0;
+  self->cur_B_mem_start = self->cur_og_B_start_byte + 
+                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
+  self->cur_C_mem_start = self->cur_og_C_start_byte + 
+                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
+  self->cur_D_mem_start = self->cur_og_D_start_byte + 
+                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
+}
+
+void reset_A_tile_subrow_in_subcol_counters(gemmini_t *self) {
+  self->cur_og_tile_row_offset = 0;
+  self->cur_A_mem_start = self->cur_og_A_start_byte + 
+                          self->cur_og_tile_col_offset * self->TILE_BYTE_WIDTH;
+}
+
+void incr_A_tile_subrow_in_subcol_counters(gemmini_t *self) {
+  self->cur_og_tile_row_offset = 0;
+
+
+}
+
+void load_D_tile_into_sp(gemmini_t *self) {
+  // only load D into spad if we are using a bias
+  if (self->USE_D_MATRIX) {
+    const size_t D_tile_row = self->cur_og_tile_row_offset;
+    const size_t D_tile_col = self->cur_og_tile_col_offset;
+    const size_t mem_start = self->og_D_offset + 
+                             (D_tile_row * 
+                              self->BYTE_ROWS_PER_TILE * self->D_BYTE_WIDTH) +
+                             (D_tile_col * self->TILE_BYTE_WIDTH);
+    const size_t mem_stride = self->repeating_bias ? 0 : self->D_BYTE_WIDTH;
+    const size_t acc_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
+  const size_t sp_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
+    if (D != NULL && !no_bias) {
+      // see sp_tiled_matmul_ws
+    }
+  }
+}
 
 void load_A_tile_into_sp(gemmini_t *self) {
   // calculate mvin parameters
@@ -262,10 +439,19 @@ void load_A_tile_into_sp(gemmini_t *self) {
 
 void matmul_and_accumulate(gemmini_t *self) {
   // calculate compute parameters
-  const size_t sp_start   = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
+  //const size_t A_sp_start = self->og_cur_tile_row * self->BYTE_ROWS_PER_TILE;
+  const size_t A_sp_row_start = self->cur_a_tile_sp_addr;
+  const size_t D_sp_row_start = self->USE_D_MATRIX ? self->cur_d_tile_sp_addr 
+                                                   : GARBAGE_ADDR;
 
   // issue gemini commands
-  gemmini_compute_accumulated(sp_start, GARBAGE_ADDR);
+  gemmini_config_ex(self->DATAFLOW, 
+                    self->ACTIVATION, 
+                    self->SYSTOLIC_OUTPUT_RSHIFT, 
+                    self->ACCUMULATOR_OUTPUT_RSHIFT,
+                    self->RELU6_INPUT_LSHIFT);
+
+  gemmini_compute_accumulated(A_sp_row_start, D_sp_row_start);
 }
 
 void store_C_tile_into_mem(gemmini_t *self) {
@@ -519,12 +705,17 @@ void incr_A_tile_subrow_in_subcol(gemmini_t *self) {
   // update the new subrow-index for this output-group
   self->og_cur_tile_row_offset = self->og_cur_tile_row_offset_next;
 
+  incr_loop_4_counters(self);
+
   // now perform any actions 
+  if(self->is_first_k_tile_subcol(self)) {
+    self->load_D_tile_into_sp(self);
+  }
   if(self->is_first_tile_subcol(self)) {
     self->load_A_tile_into_sp(self);
   }
   self->matmul_and_accumulate(self);
-  if(self->is_k_last_tile_subcol(self)) {
+  if(self->is_k_subcol_last_tile(self)) {
     self->store_C_tile_into_mem(self);
   }
 
@@ -550,6 +741,41 @@ bool is_valid_to_continue(gemmini_t *self,
 
   // TODO: check that input matrices are all multiple of tile-size!
   // TODO: other validation
+ 
+  // Make sure that the tiling factors make sense
+  if (tile_I * DIM > dim_I) {
+    printf("tile_I is too large (tile_I * DIM > dim_I)\n");
+    exit(1);
+  } else if (tile_J * DIM > dim_J) {
+    printf("tile_J is too large (tile_J * DIM > dim_J)\n");
+    exit(1);
+  } else if (tile_K * DIM > dim_K) {
+    printf("tile_K is too large (tile_K * DIM > dim_K)\n");
+    exit(1);
+  }
+
+  const size_t total_spad_rows =
+      (tile_I * tile_K * DIM) +   // Rows to store A
+      (tile_K * tile_J * DIM);    // Rows to store B
+
+  if (total_spad_rows > BANK_NUM * BANK_ROWS) {
+    printf("Not enough space in scratchpad to store A and B matrices\n");
+    exit(1);
+  }
+
+  const size_t total_acc_rows =
+      tile_I * tile_J * DIM;      // Rows to store C
+
+  if (total_acc_rows > ACC_ROWS) {
+    printf("Not enough space in accumulator to store C\n");
+    exit(1);
+  }
+
+  if (tile_I > 65535 || tile_J > 65535 || tile_K > 65535) {
+    printf("I, J, and K tiling factors must be less than 65535, to fit within the bounds of the LOOP_WS function");
+    exit(1);
+  }
+
 
   return true;
 }
@@ -570,23 +796,24 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 
   // sanitize inputs before starting
   if(!is_valid_to_continue(self, tiled_matmul_type)) {
+    // cleanup the state object
     destroy_gemmini(self);
     return;
   }
 
   // actually do the tiled matmul
-  while(has_next_output_group(self)) {
-    incr_output_group(self);
-    while(has_next_A_tile_subcol(self)) {
-      incr_A_tile_subcol(self);
+  reset_output_group(self);
+  do {
+    reset_A_tile_subcol(self);
+    do {
       while(has_next_B_tile_subcol_in_subrow(self)) {
         incr_B_tile_subcol(self);
         while(has_next_A_tile_subrow_in_subcol(self)) {
           incr_A_tile_subrow_in_subcol(self);
         }
       }
-    }
-  }
+    } while(next_A_tile_subcol(self));
+  } while(next_output_group(self));
 
   // cleanup the state object
   destroy_gemmini(self);
