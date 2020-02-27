@@ -560,6 +560,14 @@ bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
 //============================================================================
 
 void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
+  assert(self->gbl_tile_row == self->loop1_tile_row_start);
+
+  self->loop4_A_mem_addr;
+  self->loop4_A_sp_row_addr;
+
+  self->loop4_D_mem_addr;
+  // don't swap self->gbl_D_cur_sp_row_addr during this reset
+
   self->loop4_A_sp_addr = 0;
   self->loop4_C_sp_addr = self->loop3_C_sp_addr;
   self->loop4_D_sp_addr = self->loop4
@@ -577,6 +585,9 @@ void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
 }
 
 bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
+  self->gbl_tile_row;
+
+
   if(self->gbl_tile_row == self->loop1_tile_row_end) {
     // just finished the final row of tiles in the 4th loop, so were done
     return false;
@@ -787,11 +798,22 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 
 #endif // __GEMMINI_TILER_H__
 
+// main todos:
+// TODO: make 2 new instructions to preload B and set C separately
+// DONE: make instruction to load D-tile straight into an accumulator bank,
+//       while expanding the bit-width automatically if needed
+//       SOLUTION: you can load D straight into accumulator already. the
+//       input D matrix has element-sizes of acc_t!!
+// TODO: when accumulator writes out, write out in size of elem_t, not acc_t
+//
+// other TODO's
+// TODO: should we enable bias D-matrices with element size of elem_t instead
+//       of acc_t? the bias matrix would be smaller, but then we wouldn't
+//       be able to load it into the accumulator
 // TODO: in our gemmini-hardware-tiler,
 //       create a config insn to set C addr in acc without also preloading 
 //       B into array. this causes uneccesary data-movement through array
 //       when we just want to set a new C-addr for a new insn
-// TODO: make 2 new instructions to preload B and set C separately
 // TODO: investigate: if I call preload 10 times in a row, will they just
 //       overwrite the same flops in the systolic-array? so when i call
 //       matmul.compute.preloaded, it loads the last one i preload()ed?
