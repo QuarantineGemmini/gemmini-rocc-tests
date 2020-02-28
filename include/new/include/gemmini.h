@@ -10,63 +10,6 @@
 #include <stdbool.h>
 
 #include "include/gemmini_params.h"
-#include "include/gemmini_obj.h"
-
-
-
-
-// - number of bits flowing in a parallel row/col in the array
-// - this is also the exact width of a scratchpad row in bits
-const size_t array_width_bits = DIM * sizeof(elem_t);
-const size_t sp_bank_row_bits = array_width_bits;
-const size_t sp_banks         = BANK_NUM;
-const size_t sp_bank_rows     = BANK_ROWS;
-const size_t accum_rows       = ACC_ROWS;
-const size_t 
-const size_t J1_size = DIM
-
-// - TODO: i shouldn't actually know this number...
-const size_t L2_cache_size = 512 << 1024
-
-
-// each output_tile_group fits into accumulator
-for otg in output_tile_groups:
-  // start with the accumulator as zeros somehow
-  zero_out_accumulator()
-
-  // weights/inputs must fit in scratchpad banks
-  for wig in otg.weight_and_input_groups:
-    // to maximize reuse of both weights and inputs
-    for wrow in wig.weight_rows:
-      // for each col across the weight row
-      for wtile in wrow.tiles:
-        load_weight_into_spad(wtile)
-        load_weight_into_accum(wtile)
-
-        if wtile.is_first_in_row:
-          for itile in wrow.associated_input_tiles:
-            load_input_into_spad(itile)
-            matmul_and_accumulate(itile)
-        else:
-          for itile in wrow.associated_input_tiles:
-            matmul_and_accumulate(itile)
-  
-    
-
-      // do the following in parallel
-      load_input_col_into_spad(
-      for col in 
-
-
-    // do columns at a time because we can keep weights in for whole column
-    for otcol in otg.columns:
-
-      // do each tile from top to bottom in the tile-col
-      for otcell in otcol.cells:
-      
-    
-
-// for each 
 
 // Matmul utility functions
 void matmul(elem_t A[DIM][DIM], elem_t B[DIM][DIM], elem_t D[DIM][DIM], int64_t C_full[DIM][DIM]) {
@@ -521,24 +464,24 @@ void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
 
 // This function runs a tiled matrix multiplication, with automatically
 // calculated tiling factors
-void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
-        const acc_t * D, elem_t C[dim_I][dim_J],
-        int act, int shift, bool repeating_bias,
-        enum tiled_matmul_type_t tiled_matmul_type) {
-    /*
-     * REPLACE THE THREE LINES BELOW IF YOU WANT TO USE THE
-     * "tiled_matmul_auto" BELOW
-     */
-    size_t tile_I = 1;
-    size_t tile_J = 1;
-    size_t tile_K = 1;
-
-    tiled_matmul(dim_I, dim_J, dim_K,
-        A, B, D, C, act, shift, repeating_bias,
-        tile_I, tile_J, tile_K,
-        tiled_matmul_type);
-}
+//void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
+//        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
+//        const acc_t * D, elem_t C[dim_I][dim_J],
+//        int act, int shift, bool repeating_bias,
+//        enum tiled_matmul_type_t tiled_matmul_type) {
+//    /*
+//     * REPLACE THE THREE LINES BELOW IF YOU WANT TO USE THE
+//     * "tiled_matmul_auto" BELOW
+//     */
+//    size_t tile_I = 1;
+//    size_t tile_J = 1;
+//    size_t tile_K = 1;
+//
+//    tiled_matmul(dim_I, dim_J, dim_K,
+//        A, B, D, C, act, shift, repeating_bias,
+//        tile_I, tile_J, tile_K,
+//        tiled_matmul_type);
+//}
 
 #endif // SRC_MAIN_C_GEMMINI_H
 

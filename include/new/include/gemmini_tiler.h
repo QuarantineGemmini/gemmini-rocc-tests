@@ -1,20 +1,64 @@
+//===========================================================================
+// WARNING!!!!
+// this header contains implementation code. do not use in library code.
+//===========================================================================
+
 #ifndef __GEMMINI_TILER_H__
 #define __GEMMINI_TILER_H__
 
 #include <stdint.h>
+#include <string.h>
 
-//============================================================================
-// WARNING!!!!
-// -----------
-// - this header contains implementation code. do not use in library code.
-// - i use static inline a lot, which typically doesn't make sense in headers
-//============================================================================
+#include "include/gemmini_params.h"
+#include "include/gemmini.h"
 
+//===========================================================================
+// accumulator addressing helpers
+//===========================================================================
+#define ACC_ADDR_RD(addr)  ((2 << (ADDR_LEN - 2)) & (addr))
+#define ACC_ADDR_NEW(addr) ((2 << (ADDR_LEN - 2)) & (addr))
+#define ACC_ADDR_ACC(addr) ((3 << (ADDR_LEN - 2)) & (addr))
+
+//===========================================================================
+// state objects
+//===========================================================================
 typedef uint16_t tile_t;
 typedef uint16_t sp_addr_t;
 typedef uintptr_t mem_addr_t;
 
 typedef struct gemmini {
+  // global constants
+  sp_row_t    GBL_B_SP_ROW_ADDR_1;
+  sp_row_t    GBL_B_SP_ROW_ADDR_2;
+
+  tile_t      TILE_COLS_PER_GROUP;
+  tile_t      TILE_COL_END;
+  tile_t      TILE_ROWS_PER_GROUP;
+  tile_t      TILE_ROW_END;
+  tile_t      K_TILE_COL_END;
+
+  mem_addr_t  A_MEM_ADDR;            // mem-addr of A-matrix
+  mem_addr_t  B_MEM_ADDR;
+  mem_addr_t  C_MEM_ADDR;
+  mem_addr_t  D_MEM_ADDR;
+  size_t      A_BYTES_PER_TILE_ROW;  // bytes in A-matrix row * rows-per-tile
+  size_t      B_BYTES_PER_TILE_ROW;
+  size_t      C_BYTES_PER_TILE_ROW;
+  size_t      D_BYTES_PER_TILE_ROW;
+  size_t      A_BYTES_PER_ROW;       // bytes in A-matrix row
+  size_t      B_BYTES_PER_ROW;
+  size_t      C_BYTES_PER_ROW;
+  size_t      D_BYTES_PER_ROW;
+
+  bool        HAS_BIAS;              // if computing A*B+D=C, not A*B=C
+  bool        REPEATING_BIAS;        // if HAS_BIAS, repeat 1st row only
+
+  size_t      I_BYTE_COLS_PER_GROUP; // byte-width of output-group A,B,C
+  size_t      O_BYTE_COLS_PER_GROUP; // byte-width of output-group D
+  size_t      I_TILE_BYTE_WIDTH;     // byte-width of tile A,B,C
+  size_t      O_TILE_BYTE_WIDTH;     // byte-width of tile D
+  size_t      BYTE_ROWS_PER_TILE;    // num-rows of tile A,B,C,D
+
   // global state across all loops
   tile_t      gbl_tile_row;
   tile_t      gbl_tile_row;
@@ -55,207 +99,109 @@ typedef struct gemmini {
   mem_addr_t  loop4_C_mem_addr;
   mem_addr_t  loop4_D_mem_addr;
 
-  // global constants
-  sp_row_t    GBL_B_SP_ROW_ADDR_1;
-  sp_row_t    GBL_B_SP_ROW_ADDR_2;
-
-  tile_t      TILE_COLS_PER_GROUP;
-  tile_t      TILE_COL_END;
-  tile_t      TILE_ROWS_PER_GROUP;
-  tile_t      TILE_ROW_END;
-  tile_t      K_TILE_COL_END;
-
-  mem_addr_t  A_MEM_ADDR;
-  mem_addr_t  B_MEM_ADDR;
-  mem_addr_t  C_MEM_ADDR;
-  mem_addr_t  D_MEM_ADDR;
-  size_t      A_BYTES_PER_TILE_ROW;
-  size_t      B_BYTES_PER_TILE_ROW;
-  size_t      C_BYTES_PER_TILE_ROW;
-  size_t      D_BYTES_PER_TILE_ROW;
-  size_t      A_BYTES_PER_ROW;
-  size_t      B_BYTES_PER_ROW;
-  size_t      C_BYTES_PER_ROW;
-  size_t      D_BYTES_PER_ROW;
-
-  bool        HAS_BIAS;
-  bool        REPEATING_BIAS;
-
-  size_t      I_BYTE_COLS_PER_GROUP; //input byte width of group
-  size_t      O_BYTE_COLS_PER_GROUP;
-  size_t      I_TILE_BYTE_WIDTH;
-  size_t      O_TILE_BYTE_WIDTH;
-  size_t      TILE_BYTE_WIDTH;
-  size_t      BYTE_ROWS_PER_TILE;
-
 } gemmini_t;
 
 //============================================================================
-gemmini_t* create_gemmini(size_t M, size_t N, size_t K,
-                          const elem_t A[M][K], 
-                          const elem_t B[K][N],
-                          const acc_t * D, elem_t C[M][N],
-                          int act, int shift, bool repeating_bias)
-{
-  struct Gemmini* g = (gemmini_t *) malloc(sizeof(gemmini_t));
+// create_gemmini subroutines
+//============================================================================
+gemmini_t* 
+init_gemmini_state(size_t M, size_t N, size_t K, 
+                   mem_addr_t A, mem_addr_t B, mem_addr_t C, mem_addr_t D,
+                   bool bias, bool repeating_bias) {
+  // create the state struct
+  gemmini_t *self = (gemmini_t *) malloc(sizeof(gemmini_t));
+  memset(self, 0, sizeof(gemmini_t));
 
-  // C is accumulated, which is why it starts with 0b11
-  const uint32_t D_sp_addr_start = 1 << (ADDR_LEN-1);
-  const uint32_t C_sp_addr_start = 3 << (ADDR_LEN-2);
+  // define hardcoded constants
+  const size_t I_TILE_BYTE_WIDTH = DIM * sizeof(elem_t);
+  const size_t O_TILE_BYTE_WIDTH = DIM * sizeof(acc_t);
+  const size_t A_BYTE_WIDTH      = K * sizeof(elem_t);
+  const size_t BC_BYTE_WIDTH     = N * sizeof(elem_t);
+  const size_t D_BYTE_WIDTH      = N * sizeof(acc_t);
 
+  //------------------------------------------------------------------------
+  // hardware specific constants
+  //------------------------------------------------------------------------
+  self->GBL_B_SP_ROW_ADDR_1   = (BANK_NUM * BANK_ROWS) - 2*DIM;
+  self->GBL_B_SP_ROW_ADDR_2   = (BANK_NUM * BANK_ROWS) - 1*DIM;
 
-  const size_t tile_rows    = DIM;
-  const size_t tile_cols    = DIM;
-  const size_t tile_elems   = tile_rows * tile_cols;
-  const size_t tile_width_b = tile_cols * sizeof(elem_t);
-  const size_t tile_size_b  = tile_rows * tile_width_b;
-
-  // each accum and scratchpad-bank row holds 1 tile
-  const size_t sp_banks           = BANK_NUM;
-  const size_t tiles_per_sp_bank  = BANK_ROWS / tile_rows;
-  const size_t tiles_per_acc      = ACC_ROWS / tile_rows;
-
-  // issue gemini commands
-  gemmini_config_ex(self->DATAFLOW, 
-                    self->ACTIVATION, 
-                    self->SYSTOLIC_OUTPUT_RSHIFT, 
-                    self->ACCUMULATOR_OUTPUT_RSHIFT,
-                    self->RELU6_INPUT_LSHIFT);
-
-  // configure the systolic array and accumulator
-  self->DATAFLOW                  = WEIGHT_STATIONARY;
-  self->ACTIVATION                = act;
-  self->SYSTOLIC_OUTPUT_RSHIFT    = 0;
-  self->ACCUMULATOR_OUTPUT_RSHIFT = shift;
-  self->RELU6_INPUT_LSHIFT        = 0;
-
-  //==========================================================================
-  // - the 2-D shape of tiles in the accumulator. This shape depends on the 
-  //   relative size of the scratchpad, accumulator, and systolic array. 
-  // - where the formula comes from:
-  //   - a single column of 'acc_group_height' tiles from the input matrix are 
-  //     loaded into scratchpad one by one
-  //   - the '-1' is subtracted from 'acc_group_height' because I always save
-  //     1 slot in the last bank for preloading the next weights from DRAM.
-  //   - the input tiles in the scratchpad are reused 'acc_group_width' times
-  //   - each weight tile is pre-loaded into sp before it is needed, and
-  //     when it is needed, it is used 'acc_group_height' times in a row w/o 
-  //     leaving the systolic array. Then it is discarded.
-  // -------------------------------------------------------------------------
-  // - I believe this formula optimally uses the scratchpad and accumulator
-  //   for data-reuse regardless of their relative sizes.
-  //==========================================================================
-  g->acc_group_height = sp_banks * tiles_per_sp_bank - 2;
-  g->acc_group_width  = tiles_per_acc / acc_group_height;
-  if (g->acc_group_width == 0) {
-    // HACK HACK HACK: make sp/accumulator ratio more reasonable
-    g->acc_group_height = 4;
-    g->acc_group_width  = tiles_per_acc / acc_group_height;
+  self->TILE_ROWS_PER_GROUP   = (BANK_NUM * BANK_ROWS / DIM) - 2;
+  self->TILE_COLS_PER_GROUP   = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
+  if(self->TILE_COLS_PER_GROUP == 0) {
+    // NOTE: this happens if accumulator size < scratchpad size. Don't do 
+    //       this! your accumulator should be much larger than scratchpad!
+    //
+    self->TILE_ROWS_PER_GROUP = 4;
+    self->TILE_ROWS_PER_GROUP = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
   }
 
-  ASSERT(acc_group_height > 0);
-  ASSERT(acc_group_width > 0);
+  self->BYTE_ROWS_PER_TILE    = DIM;
+  self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * I_TILE_BYTE_WIDTH;
+  self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * O_TILE_BYTE_WIDTH;
+  self->I_TILE_BYTE_WIDTH     = I_TILE_BYTE_WIDTH;
+  self->O_TILE_BYTE_WIDTH     = O_TILE_BYTE_WIDTH;
 
-  const size_t acc_group_rows = (M + acc_group_height - 1) / acc_group_height;
-  const size_t acc_group_cols = (N + acc_group_width - 1) / acc_group_width;
+  //------------------------------------------------------------------------
+  // input data-specific constants
+  //------------------------------------------------------------------------
+  self->HAS_BIAS              = bias;
+  self->REPEATING_BIAS        = repeating_bias;
 
-  g->OG_COUNT = ???;
-  g->OG_HEIGHT_B = ???;
-  g->OG_WIDTH_B = ???;
-  g->OG_ROWS = (g->M + g->OG_HEIGHT_B - 1) / g->OG_HEIGHT_B;
-  g->OG_COLS = (g->N + g->OG_WIDTH_B  - 1) / g->OG_WIDTH_B;
+  self->A_MEM_ADDR            = A;
+  self->B_MEM_ADDR            = B;
+  self->C_MEM_ADDR            = C;
+  self->D_MEM_ADDR            = D;
+  self->A_BYTES_PER_TILE_ROW  = DIM * A_BYTE_WIDTH;
+  self->B_BYTES_PER_TILE_ROW  = DIM * BC_BYTE_WIDTH;
+  self->C_BYTES_PER_TILE_ROW  = DIM * BC_BYTE_WIDTH;
+  self->D_BYTES_PER_TILE_ROW  = DIM * D_BYTE_WIDTH;
+  self->A_BYTES_PER_ROW       = A_BYTE_WIDTH;
+  self->B_BYTES_PER_ROW       = BC_BYTE_WIDTH;
+  self->C_BYTES_PER_ROW       = BC_BYTE_WIDTH;
+  self->D_BYTES_PER_ROW       = D_BYTE_WIDTH;
 
-  g->OM_TILE_COLS = ; // ceiling of total output matrix tile columns
-  g->OM_TILE_ROWS = ; // ceiling of total output matrix tile rows
+  self->TILE_ROW_END          = (M / DIM) - 1;
+  self->TILE_COL_END          = (N / DIM) - 1;
+  self->K_TILE_COL_END        = (K / DIM) - 1;
+
+  return self;
 }
-
-#define ACC_ADDR_RD(addr)  ((0b10 << 30) & (addr))
-#define ACC_ADDR_NEW(addr) ((0b10 << 30) & (addr))
-#define ACC_ADDR_ACC(addr) ((0b11 << 30) & (addr))
 
 //============================================================================
-// Tiling Loop #2: Helpers
+// create and destroy gemmini: hides implementation details. NO 
 //============================================================================
+gemmini_t* 
+create_gemmini(size_t M, size_t N, size_t K,
+               const elem_t A[M][K], const elem_t B[K][N],
+               const acc_t * D, elem_t C[M][N],
+               int act, int shift, bool repeating_bias) {
 
-void is_first_A_tile_subcol(gemmini_t *self) {
-  // - returns true if we are currently at the first tile column in the 
-  //   A-matrix, which is useful for resetting the partial sums of the
-  //   current output group to zero inside gemmini's accumulators
-  return self->og_cur_tile_k_index == 0;
+  // define constants
+  const size_t DATAFLOW                  = WEIGHT_STATIONARY;
+  const size_t ACTIVATION                = act;
+  const size_t SYSTOLIC_OUTPUT_RSHIFT    = 0;
+  const size_t ACCUMULATOR_OUTPUT_RSHIFT = shift;
+  const size_t RELU6_INPUT_LSHIFT        = 0;
+
+  // initialize state
+  struct gemmini_t * self = init_gemmini_state(M, N, K,
+                                              (mem_addr_t) A, (mem_addr_t) B,
+                                              (mem_addr_t) C, (mem_addr_t) D,
+                                              (D != NULL), repeating_bias);
+
+  // issue gemini commands
+  gemmini_config_ex(DATAFLOW,
+                    ACTIVATION, 
+                    SYSTOLIC_OUTPUT_RSHIFT, 
+                    ACCUMULATOR_OUTPUT_RSHIFT,
+                    RELU6_INPUT_LSHIFT);
+
+  // state and hardware are now initialized
+  return self;
 }
 
-static inline void reset_accumulators(gemmini_t *self) {
-  self->og_use_accumulators = 0;
-}
-
-void use_accumulators(gemmini_t *self) {
-  self->og_use_accumulators = 1;
-}
-
-void is_first_B_tile_subrow(gemmini_t *self) {
-  return self->og_cur_tile_row_offset == 0;
-}
-
-//===========================================================================
-// Tiling Loop #3: Helpers
-//===========================================================================
-
-void preload_B_tile_into_arry(gemmini_t *self) {
-  // calculate preload parameters
-  const size_t B_sp_start = self->og_cur_B_tile_sp_start;
-  const size_t C_sp_start = self->og_use_accumulators ? 
-                            ACC_ADDR_ACC(self->og_cur_tile_index) :
-                            ACC_ADDR_NEW(self->og_cur_tile_index);
-  // issue gemmini commands
-  gemmini_preload(B_sp_start, C_sp_start);
-}
-
-bool is_last_tile_subrow(gemmini_t *self) {
-  // are we currently computing a tile in the last subrow of the output-group
-  return self->og_cur_tile_row_offset == (self->og_end_tile_row - 1);
-}
-
-bool is_first_tile_subcol(gemmini_t *self) {
-  // are we currently computing a tile in the first subcol of the output-group
-  return self->og_cur_tile_col_offset == 0;
-}
-
-bool is_last_tile_subcol(gemmini_t *self) {
-  // are we currently computing a tile in the last subcol of the output-group
-  return self->og_cur_tile_col_offset == (self->og_end_tile_col - 1);
-}
-
-bool is_on_first_k_subcol(gemmini_t *self) {
-  // are we currently on the first k-subcol in the input A-matrix
-  return self->og_cur_k_subcol_index == 0;
-
-bool is_on_last_k_subcol(gemmini_t *self) {
-  // are we currently on the last k-subcol in the input A-matrix
-  // return self->og_cur_tile_k_index == (self->A_TILE_WIDTH - 1);
-  return self->cur_k_subcol_index == self->max_k_subcol_index;
-}
-
-void load_next_B_tile_into_sp(gemmini_t *self) {
-  // calculate mvin parameters
-  const size_t next_B_tile_col = (self->og_cur_tile_col_offset + 1) %
-                                  self->og_tile_cols;
-  const size_t next_B_tile_row = (next_B_tile_col == 0) ?
-                                  (self->og_cur_tile_row_offset + 1) : 0;
-
-  const size_t mem_start = self->og_B_offset + 
-                           (next_B_tile_row * 
-                            self->BYTE_ROWS_PER_TILE * self->B_BYTE_WIDTH) +
-                           (next_B_tile_col * self->TILE_BYTE_WIDTH);
-  const size_t mem_stride = self->B_BYTE_WIDTH;
-  const size_t sp_start   = self->og_next_B_tile_sp_start;
-
-  // issue gemmini commands
-  gemmini_config_ld(mem_stride);
-  gemmini_mvin(mem_start, sp_start);
-
-  // swap pointers to cur/next B-tile in the scratchpad
-  self->og_next_B_tile_sp_start = self->og_cur_B_tile_sp_start;
-  self->og_cur_B_tile_sp_start = sp_start;
+void destroy_gemmini(gemmini_t *self) {
+  free(self);
 }
 
 //============================================================================
@@ -368,7 +314,7 @@ bool next_A_tile_subcol(gemmini_t *self) {
   }
   self->loop2_k_tile_col += 1;
 
-  self->loop2_A_mem_addr += self->TILE_BYTE_WIDTH;
+  self->loop2_A_mem_addr += self->I_TILE_BYTE_WIDTH;
   self->loop2_B_mem_addr += self->B_BYTES_PER_TILE_ROW;
   self->loop2_C_mem_addr += 0;
   self->loop2_D_mem_addr += 0;
@@ -561,56 +507,27 @@ void maybe_move_C_tile_into_mem(gemmini_t *self) {
 //============================================================================
 // Input Validation
 //============================================================================
-bool is_valid_to_continue(gemmini_t *self, 
-                          enum tiled_matmul_type_t tiled_matmul_type) {
+bool is_valid_to_continue(size_t M, size_t N, size_t K, 
+                          const elem_t A[M][K], 
+                          const elem_t B[K][N],
+                          const acc_t * D, elem_t C[M][N],
+                          int act, int shift, bool repeating_bias,
+                          enum tiled_matmul_type_t tiled_matmul_type) 
+
+  // validate inputs
+  assert(M % DIM == 0 && M > 0);
+  assert(N % DIM == 0 && N > 0);
+  assert(K % DIM == 0 && K > 0);
+
   // basic sanity checks
   if (tiled_matmul_type == OS) {
     printf("Output-stationary dataflow unsupported for EE290 class\n");
     exit(1);
   } else if (tiled_matmul_type == CPU) {
-    matmul_cpu(self->M, self->N, self->K, 
-               self->A, self->B, self->D, self->C, 
-               self->act, self->shift, self->repeating_bias);
+    matmul_cpu(M, N, K, A, B, D, C, 
+               act, shift, repeating_bias);
     return false;
   }
-
-  // TODO: check that input matrices are all multiple of tile-size!
-  // TODO: other validation
- 
-  // Make sure that the tiling factors make sense
-  if (tile_I * DIM > dim_I) {
-    printf("tile_I is too large (tile_I * DIM > dim_I)\n");
-    exit(1);
-  } else if (tile_J * DIM > dim_J) {
-    printf("tile_J is too large (tile_J * DIM > dim_J)\n");
-    exit(1);
-  } else if (tile_K * DIM > dim_K) {
-    printf("tile_K is too large (tile_K * DIM > dim_K)\n");
-    exit(1);
-  }
-
-  const size_t total_spad_rows =
-      (tile_I * tile_K * DIM) +   // Rows to store A
-      (tile_K * tile_J * DIM);    // Rows to store B
-
-  if (total_spad_rows > BANK_NUM * BANK_ROWS) {
-    printf("Not enough space in scratchpad to store A and B matrices\n");
-    exit(1);
-  }
-
-  const size_t total_acc_rows =
-      tile_I * tile_J * DIM;      // Rows to store C
-
-  if (total_acc_rows > ACC_ROWS) {
-    printf("Not enough space in accumulator to store C\n");
-    exit(1);
-  }
-
-  if (tile_I > 65535 || tile_J > 65535 || tile_K > 65535) {
-    printf("I, J, and K tiling factors must be less than 65535, to fit within the bounds of the LOOP_WS function");
-    exit(1);
-  }
-
 
   return true;
 }
@@ -625,46 +542,44 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
                        int act, int shift, bool repeating_bias,
                        enum tiled_matmul_type_t tiled_matmul_type) 
 {
-  // create the state object
-  gemmini_t *self = create_gemmini(dim_I, dim_J, dim_K, A, B, D, C, 
-                                   act, shift, repeating_bias);
-
   // sanitize inputs before starting
-  if(!is_valid_to_continue(self, tiled_matmul_type)) {
+  if(should_continue(dim_I, dim_J, dim_K, A, B, D, C, 
+                     act, shift, repeating_bias, tiled_matmul_type)) {
+    // create the state object
+    gemmini_t *self = create_gemmini(dim_I, dim_J, dim_K, A, B, D, C, 
+                                     act, shift, repeating_bias);
+    // actually do the tiled matmul
+    reset_output_group(self);
+    do {
+      reset_A_tile_subcol(self);
+      do {
+        move_first_B_tile_into_sp(self);
+        reset_B_tile_subcol_in_subrow(self);
+        do {
+          maybe_move_next_B_tile_into_sp(self);
+          reset_A_tile_subrow_in_subcol(self);
+          do {
+            maybe_move_A_tile_into_sp(self);
+            maybe_move_D_tile_into_acc(self);
+            preload_B_tile_into_array_and_set_C_addr_in_acc(self);
+            do_matmul(self);
+            maybe_move_C_tile_into_mem(self);
+
+          } while(next_A_tile_subrow_in_subcol(self));
+        } while(next_B_tile_subcol_in_subrow(self));
+      } while(next_A_tile_subcol(self));
+    } while(next_output_group(self));
+
     // cleanup the state object
     destroy_gemmini(self);
-    return;
   }
-
-  // actually do the tiled matmul
-  reset_output_group(self);
-  do {
-    reset_A_tile_subcol(self);
-    do {
-      move_first_B_tile_into_sp(self);
-      reset_B_tile_subcol_in_subrow(self);
-      do {
-        maybe_move_next_B_tile_into_sp(self);
-        reset_A_tile_subrow_in_subcol(self);
-        do {
-          maybe_move_A_tile_into_sp(self);
-          maybe_move_D_tile_into_acc(self);
-          preload_B_tile_into_array_and_set_C_addr_in_acc(self);
-          do_matmul(self);
-          maybe_move_C_tile_into_mem(self);
-
-        } while(next_A_tile_subrow_in_subcol(self));
-      } while(next_B_tile_subcol_in_subrow(self));
-    } while(next_A_tile_subcol(self));
-  } while(next_output_group(self));
-
-  // cleanup the state object
-  destroy_gemmini(self);
 }
 
 #endif // __GEMMINI_TILER_H__
 
 // main todos:
+// TODO: add a bunch of asserts/debug/printf everywhere
+// TODO: enable error and warning messages 
 // TODO: make 2 new instructions to preload B and set C separately
 // TODO: what to do about input matrices that are not at tile-granularity?
 //       we need to add support for this in hardware by automatically adding
@@ -781,4 +696,21 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 // - in_prop is 0 or 1
 // - in_prop will toggle when the mesh_ctrl_signals.propagate is 1 AND
 //   it just finished loading the previous matmul inputs into shifters+mesh
+
+  //==========================================================================
+  // - the 2-D shape of tiles in the accumulator. This shape depends on the 
+  //   relative size of the scratchpad, accumulator, and systolic array. 
+  // - where the formula comes from:
+  //   - a single column of 'acc_group_height' tiles from the input matrix are 
+  //     loaded into scratchpad one by one
+  //   - the '-1' is subtracted from 'acc_group_height' because I always save
+  //     1 slot in the last bank for preloading the next weights from DRAM.
+  //   - the input tiles in the scratchpad are reused 'acc_group_width' times
+  //   - each weight tile is pre-loaded into sp before it is needed, and
+  //     when it is needed, it is used 'acc_group_height' times in a row w/o 
+  //     leaving the systolic array. Then it is discarded.
+  // -------------------------------------------------------------------------
+  // - I believe this formula optimally uses the scratchpad and accumulator
+  //   for data-reuse regardless of their relative sizes.
+  //==========================================================================
 
