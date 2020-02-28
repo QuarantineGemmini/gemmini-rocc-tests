@@ -1,13 +1,16 @@
 //===========================================================================
-// WARNING!!!!
-// this header contains implementation code. do not use in library code.
+// This contains "tiled_matmul_auto", but implemented in a way that can
+// be easily converted to a FSM in RTL. I am doing this to pipeclean the
+// FSM's scheduling algorithm in software before doing it in hardware, to
+// get a rough idea of what the hardware performance might be.
 //===========================================================================
-
 #ifndef __GEMMINI_TILER_H__
 #define __GEMMINI_TILER_H__
 
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "include/gemmini_params.h"
 #include "include/gemmini.h"
@@ -27,15 +30,24 @@ typedef uint16_t sp_addr_t;
 typedef uintptr_t mem_addr_t;
 
 typedef struct gemmini {
-  // global constants
+  //-------------------------------------
+  // hardware-specific global constants
   sp_row_t    GBL_B_SP_ROW_ADDR_1;
   sp_row_t    GBL_B_SP_ROW_ADDR_2;
 
   tile_t      TILE_COLS_PER_GROUP;
-  tile_t      TILE_COL_END;
   tile_t      TILE_ROWS_PER_GROUP;
-  tile_t      TILE_ROW_END;
-  tile_t      K_TILE_COL_END;
+
+  size_t      BYTE_ROWS_PER_TILE;    // num-rows of tile A,B,C,D
+  size_t      I_BYTE_COLS_PER_GROUP; // byte-width of output-group A,B,C
+  size_t      O_BYTE_COLS_PER_GROUP; // byte-width of output-group D
+  size_t      I_TILE_BYTE_WIDTH;     // byte-width of tile A,B,C
+  size_t      O_TILE_BYTE_WIDTH;     // byte-width of tile D
+
+  //-------------------------------------
+  // input data-specific global constants
+  bool        HAS_BIAS;              // if computing A*B+D=C, not A*B=C
+  bool        REPEATING_BIAS;        // if HAS_BIAS, repeat 1st row only
 
   mem_addr_t  A_MEM_ADDR;            // mem-addr of A-matrix
   mem_addr_t  B_MEM_ADDR;
@@ -50,25 +62,23 @@ typedef struct gemmini {
   size_t      C_BYTES_PER_ROW;
   size_t      D_BYTES_PER_ROW;
 
-  bool        HAS_BIAS;              // if computing A*B+D=C, not A*B=C
-  bool        REPEATING_BIAS;        // if HAS_BIAS, repeat 1st row only
+  tile_t      TILE_COL_END;
+  tile_t      TILE_ROW_END;
+  tile_t      K_TILE_COL_END;
 
-  size_t      I_BYTE_COLS_PER_GROUP; // byte-width of output-group A,B,C
-  size_t      O_BYTE_COLS_PER_GROUP; // byte-width of output-group D
-  size_t      I_TILE_BYTE_WIDTH;     // byte-width of tile A,B,C
-  size_t      O_TILE_BYTE_WIDTH;     // byte-width of tile D
-  size_t      BYTE_ROWS_PER_TILE;    // num-rows of tile A,B,C,D
-
+  //-------------------------------------
   // global state across all loops
   tile_t      gbl_tile_row;
   tile_t      gbl_tile_row;
   sp_row_t    gbl_B_cur_sp_row_addr;
   sp_row_t    gbl_B_alt_sp_row_addr;
 
+  //-------------------------------------
   // global state that is reset for each output-group
   sp_row_t    gbl_C_acc_row_addr;
   sp_row_t    gbl_D_acc_row_addr;
 
+  //-------------------------------------
   // loop1 local state
   tile_t      loop1_tile_col_start;
   tile_t      loop1_tile_col_end;
@@ -79,6 +89,7 @@ typedef struct gemmini {
   mem_addr_t  loop1_C_mem_addr;
   mem_addr_t  loop1_D_mem_addr;
 
+  //-------------------------------------
   // loop2 local state
   tile_t      loop2_k_tile_col;
   mem_addr_t  kloop2_A_mem_addr;
@@ -86,12 +97,14 @@ typedef struct gemmini {
   mem_addr_t  kloop2_C_mem_addr;
   mem_addr_t  kloop2_D_mem_addr;
 
+  //-------------------------------------
   // loop3 local state
   mem_addr_t  loop3_A_mem_addr;
   mem_addr_t  loop3_B_mem_addr;
   mem_addr_t  loop3_C_mem_addr;
   mem_addr_t  loop3_D_mem_addr;
 
+  //-------------------------------------
   // loop4 local state
   sp_row_t    loop4_A_sp_row_addr;
   mem_addr_t  loop4_A_mem_addr;
@@ -576,141 +589,4 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 }
 
 #endif // __GEMMINI_TILER_H__
-
-// main todos:
-// TODO: add a bunch of asserts/debug/printf everywhere
-// TODO: enable error and warning messages 
-// TODO: make 2 new instructions to preload B and set C separately
-// TODO: what to do about input matrices that are not at tile-granularity?
-//       we need to add support for this in hardware by automatically adding
-//       zeros
-// TODO: fix the messed up ratio of spad and accumulator rows. there should
-//       be way more acc rows than sp rows in this scheme im using, for max
-//       utilization and data-reuse
-//
-// DONE: make instruction to load D-tile straight into an accumulator bank,
-//       while expanding the bit-width automatically if needed
-//       SOLUTION: you can load D straight into accumulator already. the
-//       input D matrix has element-sizes of acc_t!!
-// DONE: when accumulator writes out, write out in size of elem_t, not acc_t
-//       SOLUTION: the AccumulatorMem always reads-out with inputType elements.
-//       in the "activation/shift pipeline", it clips the shifted value to 
-//       the input size. This is why the C_matrix is of elem_t, and not acc_t
-//
-// other TODO's
-// TODO: should we enable bias D-matrices with element size of elem_t instead
-//       of acc_t? the bias matrix would be smaller, but then we wouldn't
-//       be able to load it into the accumulator
-// TODO: when accumulator writes out, write out in size of elem_t, not acc_t
-// TODO: in our gemmini-hardware-tiler,
-//       create a config insn to set C addr in acc without also preloading 
-//       B into array. this causes uneccesary data-movement through array
-//       when we just want to set a new C-addr for a new insn
-// TODO: investigate: if I call preload 10 times in a row, will they just
-//       overwrite the same flops in the systolic-array? so when i call
-//       matmul.compute.preloaded, it loads the last one i preload()ed?
-//       This would be IDEAL. I think the answer is yes.
-// TODO: right now, mesh MUST be square (block_size) since ctrl signals are
-//       hardcoded to think that way. this is ok with me
-
-// - only use add, sub, compare operations. need to implement in hardware
-//   as next-state logic!
-
-// wieght-stationary semantics:
-//   perform_single_preload:
-//     - only loads B from scratchpad, accumulator, or all zeros
-//     - does NOT perform a matmul as well
-//   overlap matmul and next preload
-//     - you MUST issue the matmul first and the preload 2nd
-//     - only loads B from scratchpad, accumulator, or all zeros
-//     - make sure you use matmul.compute.accumulated command, which won't flip
-//       the B if used.
-//   matmul only on same B
-//     - make sure you use matmul.compute.accumulated command, which won't flip
-//   matmul only on other preloaded B
-//     - make sure you use matmul.compute.preloaded command
-
-
-// setting B == GARBAGE_ADDR: preloads zeros (i won't use this ever)
-
-// output tiles in accumulator:
-// - on first iteration:
-//   set D == GARBAGE_ADDR: sets the initial D to all zeros
-//   set C == destination addr in accumulator (high 2 bits are 10
-//   
-// - on successive iterations
-//   set C == destination addr in accumulator (high 2 bits are 11)
-//   set D == C
- 
-// on last output_group iteration:
-// - mvout the accumulator to 
-
-
-//foreach output group from L->R, T->B
-//  foreach K-col in input matrix for this output group
-//    if first K-col in input group, zero the accumulator, else keep it
-//    load first W tile into sp
-//    for each weight tile in row
-//      preload W tile into array from sp
-//      load next W tile into sp
-//      for each vertical tile in K-col image group
-//        if first col in weight-row
-//          load K-col-tile into sp
-//        matmul.accum I*A -> accum
-//        if last K-col in input group
-//          mvout accum to memory
-
-// inside ex_ctrl:
-// ---------------
-// - flush, compute, cmd_wait states:
-//   - only does a flush when matmul_is_in_progress and a new preload or 
-//     new matmul have not been issued. Flush means a ex_config is pending
-//   - ctrl will not send new preload/matmul cmds to mesh until the all rows 
-//     previous rows have entered the shifters. 
-// - propagate notes
-//   - in_prop_flush is ALWAYS 0 for WS flows
-//   - in_prop is set to 1 ONLY if preload() is called, regardless of B/C addrs
-// - mesh_ctrl_signals for propagate in WS mode:
-//   1) 0 if flushing (no command being sent to mesh)
-//   2) 0 if issuing a single_preload with no overlapping matmul
-//   3) 0 if issuing both a preload and a matmul-accumulate
-//   4) 0 if issuing a single matmul-accumulate
-//   5) 1 if issuing both a preload and a matmul-preloaded
-//   5) 1 if issuing a single matmul-preloaded
-// - C_addr handling
-//   - you MUST issue a preload and then a matmul.{prop,accum} immediatly
-//   - when you do this, they both get scheduled to the mesh together
-//   - C_addr does not persist if you don't issue both right away
-// - HOW TO SCHEDULE B-prop AND C-accum addrs
-//   - on first tile in 4th loop: 
-//       1) preload this B-tile and set this C_addr
-//       2) matmul.preloaded
-//   - on subsequent tiles in 4th loop:
-//       1) preload garbage B-tile (avoid scratchpad load) and set this C_addr
-//       2) matmul.accumulated 
-//          - THIS DOES NOT MEAN C IS ACCUMULATED/OVERWRITTEN -- ORTHOGONAL!!!
-//          - THIS MEANS USE NEW C VALUE BUT KEEP THE B VALUE IN ARRAY
-//
-// inside mesh_with_delays:
-// ---------------
-// - in_prop is 0 or 1
-// - in_prop will toggle when the mesh_ctrl_signals.propagate is 1 AND
-//   it just finished loading the previous matmul inputs into shifters+mesh
-
-  //==========================================================================
-  // - the 2-D shape of tiles in the accumulator. This shape depends on the 
-  //   relative size of the scratchpad, accumulator, and systolic array. 
-  // - where the formula comes from:
-  //   - a single column of 'acc_group_height' tiles from the input matrix are 
-  //     loaded into scratchpad one by one
-  //   - the '-1' is subtracted from 'acc_group_height' because I always save
-  //     1 slot in the last bank for preloading the next weights from DRAM.
-  //   - the input tiles in the scratchpad are reused 'acc_group_width' times
-  //   - each weight tile is pre-loaded into sp before it is needed, and
-  //     when it is needed, it is used 'acc_group_height' times in a row w/o 
-  //     leaving the systolic array. Then it is discarded.
-  // -------------------------------------------------------------------------
-  // - I believe this formula optimally uses the scratchpad and accumulator
-  //   for data-reuse regardless of their relative sizes.
-  //==========================================================================
 
