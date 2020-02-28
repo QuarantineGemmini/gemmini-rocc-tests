@@ -462,6 +462,7 @@ void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
   }
 }
 
+#include "include/gemmini_tiler.h"
 // This function runs a tiled matrix multiplication, with automatically
 // calculated tiling factors
 //void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
