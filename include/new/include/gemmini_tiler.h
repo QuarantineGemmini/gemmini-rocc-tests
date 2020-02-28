@@ -135,8 +135,6 @@ init_gemmini_state(size_t M, size_t N, size_t K,
                    mem_addr_t A, mem_addr_t B, mem_addr_t C, mem_addr_t D,
                    bool bias, bool repeating_bias) {
   // create the state struct
-  // BUG: no malloc in bare-metal
-  //gemmini_t *self = (gemmini_t *) malloc(sizeof(gemmini_t));
   gemmini_t *self = &static_self;
   memset(self, 0, sizeof(gemmini_t));
 
@@ -158,7 +156,6 @@ init_gemmini_state(size_t M, size_t N, size_t K,
   if(self->TILE_COLS_PER_GROUP == 0) {
     // NOTE: this happens if accumulator size < scratchpad size. Don't do 
     //       this! your accumulator should be much larger than scratchpad!
-    //
     self->TILE_ROWS_PER_GROUP = 4;
     self->TILE_COLS_PER_GROUP = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
   }
@@ -276,6 +273,9 @@ bool next_output_group(gemmini_t *self) {
   if(self->gbl_tile_col == self->TILE_COL_END) {
     if(self->gbl_tile_row == self->TILE_ROW_END) {
       // we finished the last output group. so we're done
+      DBG("output_group finished = (%d,%d), (%d,%d)\n",
+          self->loop1_tile_col_start, self->loop1_tile_row_start,
+          self->loop1_tile_col_end,   self->loop1_tile_row_end);
       return false;
     } else {
       self->gbl_tile_col = 0;
@@ -284,7 +284,7 @@ bool next_output_group(gemmini_t *self) {
     }
   } else {
     self->gbl_tile_col += 1;
-    self->gbl_tile_row -= self->TILE_ROWS_PER_GROUP;
+    self->gbl_tile_row  = self->loop1_tile_row_start;
     did_col_incr = true;
   }
 
@@ -609,10 +609,6 @@ bool is_valid_to_continue(size_t M, size_t N, size_t K,
                           int act, int shift, bool repeating_bias,
                           enum tiled_matmul_type_t tiled_matmul_type) {
   // validate inputs
-  // BUG: no assert in bare-metal
-  // assert(M % DIM == 0 && M > 0);
-  // assert(N % DIM == 0 && N > 0);
-  // assert(K % DIM == 0 && K > 0);
   if(!(M % DIM == 0 && M > 0)) {
     printf("invalid M: %d, not multiple of %d\n", M, DIM);
     exit(1);

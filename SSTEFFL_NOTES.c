@@ -135,4 +135,9 @@
   //   for data-reuse regardless of their relative sizes.
   //==========================================================================
 
-
+  // BUG: no malloc in bare-metal
+  //gemmini_t *self = (gemmini_t *) malloc(sizeof(gemmini_t));
+  // BUG: no assert in bare-metal
+  // assert(M % DIM == 0 && M > 0);
+  // assert(N % DIM == 0 && N > 0);
+  // assert(K % DIM == 0 && K > 0);

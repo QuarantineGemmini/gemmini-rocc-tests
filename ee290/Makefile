@@ -28,6 +28,7 @@ GEMMINI_HEADERS = $(abs_top_srcdir)/include/new/include/gemmini.h \
 CFLAGS := $(CFLAGS) \
 	-DPREALLOCATE=1 \
 	-DMULTITHREAD=1 \
+	-DNODEBUG \
 	-mcmodel=medany \
 	-std=gnu99 \
 	-O2 \
