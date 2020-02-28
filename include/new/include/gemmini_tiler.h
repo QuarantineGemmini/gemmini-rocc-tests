@@ -334,10 +334,14 @@ bool next_output_group(gemmini_t *self) {
 void reset_A_tile_subcol(gemmini_t *self) {
   // this scope modifies: self->gbl_B_cur_sp_row_addr;
   //                      self->gbl_B_alt_sp_row_addr;
+  //                      self->gbl_C_acc_row_addr
+  //                      self->gbl_D_acc_row_addr
   
-  self->loop2_k_tile_col = 0;
-  self->gbl_tile_row = self->loop1_tile_row_start;
-  self->gbl_tile_col = self->loop1_tile_col_start;
+  self->loop2_k_tile_col   = 0;
+  self->gbl_tile_row       = self->loop1_tile_row_start;
+  self->gbl_tile_col       = self->loop1_tile_col_start;
+  self->gbl_C_acc_row_addr = 0;
+  self->gbl_D_acc_row_addr = 0;
 
   self->loop2_A_mem_addr = self->loop1_A_mem_addr;
   self->loop2_B_mem_addr = self->loop1_B_mem_addr;
@@ -355,9 +359,11 @@ bool next_A_tile_subcol(gemmini_t *self) {
       self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col);
     return false;
   }
-  self->loop2_k_tile_col += 1;
-  self->gbl_tile_row      = self->loop1_tile_row_start;
-  self->gbl_tile_col      = self->loop1_tile_col_start;
+  self->loop2_k_tile_col  += 1;
+  self->gbl_tile_row       = self->loop1_tile_row_start;
+  self->gbl_tile_col       = self->loop1_tile_col_start;
+  self->gbl_C_acc_row_addr = 0;
+  self->gbl_D_acc_row_addr = 0;
 
   self->loop2_A_mem_addr += self->I_TILE_BYTE_WIDTH;
   self->loop2_B_mem_addr += self->B_BYTES_PER_TILE_ROW;
@@ -380,6 +386,8 @@ void move_first_B_tile_into_sp(gemmini_t *self) {
   const size_t B_mem_stride  = self->B_BYTES_PER_ROW;
   const size_t B_sp_row_addr = self->gbl_B_cur_sp_row_addr;
 
+  DBG("        mvin(B,stride=%u,mem=%x,sp=%u)\n", 
+      B_mem_stride, B_mem_addr, B_sp_row_addr);
   // issue gemmini commands
   gemmini_config_ld(B_mem_stride);
   gemmini_mvin(B_mem_addr, B_sp_row_addr);
@@ -391,6 +399,7 @@ void move_first_B_tile_into_sp(gemmini_t *self) {
 
 void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
   // this scope modifies: self->gbl_tile_col
+  //                      self->gbl_tile_row
   //                      self->gbl_B_cur_sp_row_addr
   //                      self->gbl_B_alt_sp_row_addr
   //                      self->gbl_C_acc_row_addr
@@ -408,24 +417,26 @@ void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
 bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
   if(self->gbl_tile_col == self->loop1_tile_col_end) {
     // we have already done the last column in the output-group, so were done
-  DBG("  <-next_B_tile_subcol_in_subrow    = (row,col,k), (%d,%d,%d)\n",
-      self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col);
+    DBG("  <-next_B_tile_subcol_in_subrow    = (row,col,k), (%d,%d,%d)\n",
+        self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col);
     return false;
   }
-  self->gbl_tile_col += 1;
+  // modify global state
+  self->gbl_tile_row             = self->loop1_tile_row_start;
+  self->gbl_tile_col            += 1;
 
+  self->gbl_C_acc_row_addr      += self->BYTE_ROWS_PER_TILE;
+  self->gbl_D_acc_row_addr      += self->BYTE_ROWS_PER_TILE;
+
+  const size_t tmp_B_sp_row_addr = self->gbl_B_cur_sp_row_addr;
+  self->gbl_B_cur_sp_row_addr    = self->gbl_B_alt_sp_row_addr;
+  self->gbl_B_alt_sp_row_addr    = tmp_B_sp_row_addr;
+
+  // modify loop3-local state
   self->loop3_A_mem_addr += 0;
   self->loop3_B_mem_addr += self->I_TILE_BYTE_WIDTH;
   self->loop3_C_mem_addr += self->I_TILE_BYTE_WIDTH;
   self->loop3_D_mem_addr += self->O_TILE_BYTE_WIDTH;
-
-  self->gbl_C_acc_row_addr  += self->BYTE_ROWS_PER_TILE;
-  self->gbl_D_acc_row_addr  += self->BYTE_ROWS_PER_TILE;
-
-  // swap current/alternate B-tile scratchpad addrs
-  const size_t tmp_B_sp_row_addr = self->gbl_B_cur_sp_row_addr;
-  self->gbl_B_cur_sp_row_addr    = self->gbl_B_alt_sp_row_addr;
-  self->gbl_B_alt_sp_row_addr    = tmp_B_sp_row_addr;
 
   DBG("    next_B_tile_subcol_in_subrow    = (row,col,k), (%d,%d,%d)\n",
       self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col);
@@ -441,9 +452,11 @@ void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
   // calculate mvin parameters
   const size_t B_mem_addr    = self->loop3_B_mem_addr + 
                                self->I_TILE_BYTE_WIDTH;
-  const size_t B_mem_stride  = self->A_BYTES_PER_ROW;
+  const size_t B_mem_stride  = self->B_BYTES_PER_ROW;
   const size_t B_sp_row_addr = self->gbl_B_alt_sp_row_addr;
 
+  DBG("        mvin(B,stride=%u,mem=%x,sp=%u)\n", 
+      B_mem_stride, B_mem_addr, B_sp_row_addr);
   // issue gemmini commands
   gemmini_config_ld(B_mem_stride);
   gemmini_mvin(B_mem_addr, B_sp_row_addr);
@@ -476,16 +489,18 @@ bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
         self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col);
     return false;
   }
-  self->gbl_tile_row += 1;
+  // modify global state
+  self->gbl_tile_row        += 1;
+  self->gbl_C_acc_row_addr  += self->BYTE_ROWS_PER_TILE;
+  self->gbl_D_acc_row_addr  += self->BYTE_ROWS_PER_TILE;
 
+  // modify loop4-local state
   self->loop4_A_mem_addr    += self->A_BYTES_PER_TILE_ROW;
   self->loop4_C_mem_addr    += self->C_BYTES_PER_TILE_ROW;
   self->loop4_D_mem_addr    += (self->HAS_BIAS && !self->REPEATING_BIAS) ?
                                self->D_BYTES_PER_TILE_ROW : 0;
 
   self->loop4_A_sp_row_addr += self->BYTE_ROWS_PER_TILE;
-  self->gbl_C_acc_row_addr  += self->BYTE_ROWS_PER_TILE;
-  self->gbl_D_acc_row_addr  += self->BYTE_ROWS_PER_TILE;
 
   DBG("      next_A_tile_subrow_in_subcol  = (row,col,k), (%d,%d,%d)\n",
       self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col);
@@ -503,6 +518,8 @@ void maybe_move_A_tile_into_sp(gemmini_t *self) {
   const size_t A_mem_stride  = self->A_BYTES_PER_ROW;
   const size_t A_sp_row_addr = self->loop4_A_sp_row_addr;
 
+  DBG("        mvin(A,stride=%u,mem=%x,sp=%u)\n", 
+      A_mem_stride, A_mem_addr, A_sp_row_addr);
   // issue gemmini commands
   gemmini_config_ld(A_mem_stride);
   gemmini_mvin(A_mem_addr, A_sp_row_addr);
@@ -520,6 +537,9 @@ void maybe_move_D_tile_into_acc(gemmini_t *self) {
                                 self->D_BYTES_PER_ROW;
   const size_t D_acc_row_addr = ACC_ADDR_NEW(self->gbl_D_acc_row_addr);
 
+  DBG("        mvin(D,stride=%u,mem=%x,acc=%u,%u)\n", 
+      D_mem_stride, D_mem_addr,
+      (D_acc_row_addr >> 30) & 0x3, D_acc_row_addr & 0x3fffffff);
   // issue gemmini commands
   gemmini_config_ld(D_mem_stride);
   gemmini_mvin(D_mem_addr, D_acc_row_addr);
@@ -571,9 +591,9 @@ void maybe_move_C_tile_into_mem(gemmini_t *self) {
   const size_t C_mem_stride   = self->C_BYTES_PER_ROW;
   const size_t C_acc_row_addr = ACC_ADDR_RD(self->gbl_C_acc_row_addr);
 
-    DBG("        mvout(C,stride=%u,mem=%u,acc=%u,%u)\n", 
-        C_mem_stride, C_mem_addr,
-        (C_acc_row_addr >> 30) & 0x3, C_acc_row_addr & 0x3fffffff);
+  DBG("        mvout(C,stride=%u,mem=%x,acc=%u,%u)\n", 
+      C_mem_stride, C_mem_addr,
+      (C_acc_row_addr >> 30) & 0x3, C_acc_row_addr & 0x3fffffff);
   // issue gemmini commands
   gemmini_config_st(C_mem_stride);
   gemmini_mvout(C_mem_addr, C_acc_row_addr);

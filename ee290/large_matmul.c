@@ -15,8 +15,8 @@
 //#define DIM_I 64
 //#define DIM_K 64
 //#define DIM_J 64
-#define DIM_I 32
-#define DIM_K 32
+#define DIM_I 64
+#define DIM_K 64
 #define DIM_J 64
 
 void print_tile(elem_t* in, int tile_dim) {
