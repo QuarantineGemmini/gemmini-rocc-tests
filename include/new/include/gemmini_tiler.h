@@ -681,6 +681,7 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
     // cleanup the state object
     destroy_gemmini(self);
   }
+  gemmini_fence();
 }
 
 #endif // __GEMMINI_TILER_H__
