@@ -17,9 +17,9 @@
 //===========================================================================
 // convenient macros
 //===========================================================================
-#define ACC_ADDR_RD(addr)  ((2 << (ADDR_LEN - 2)) | (addr))
-#define ACC_ADDR_NEW(addr) ((2 << (ADDR_LEN - 2)) | (addr))
-#define ACC_ADDR_ACC(addr) ((3 << (ADDR_LEN - 2)) | (addr))
+#define ACC_ADDR_RD(addr)  (((2 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
+#define ACC_ADDR_NEW(addr) (((2 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
+#define ACC_ADDR_ACC(addr) (((3 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
 
 #define MIN(a,b) ({ __typeof__ (a) _a = (a); \
                     __typeof__ (b) _b = (b); \

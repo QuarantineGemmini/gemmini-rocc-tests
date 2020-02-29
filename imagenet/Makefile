@@ -12,12 +12,17 @@ else
 endif
 
 BENCH_COMMON = $(abs_top_srcdir)/riscv-tests/benchmarks/common
-GEMMINI_HEADERS = $(abs_top_srcdir)/include/gemmini.h $(abs_top_srcdir)/include/gemmini_params.h $(abs_top_srcdir)/include/gemmini_nn.h
+GEMMINI_HEADERS = $(abs_top_srcdir)/include/new/include/gemmini.h \
+									$(abs_top_srcdir)/include/new/include/gemmini_params.h \
+									$(abs_top_srcdir)/include/new/include/gemmini_nn.h \
+									$(abs_top_srcdir)/include/new/include/gemmini_tiler.h
 
+# SSTEFFL: changed -I$(abs_top_srcdir) to -I$(abs_top_srcdir)/include/new
 CFLAGS := $(CFLAGS) \
 	-DPREALLOCATE=1 \
 	-DMULTITHREAD=1 \
 	-mcmodel=medany \
+	-DNODEBUG \
 	-std=gnu99 \
 	-O2 \
 	-ffast-math \
@@ -28,7 +33,7 @@ CFLAGS := $(CFLAGS) \
 	-lgcc \
 	-I$(abs_top_srcdir)/riscv-tests \
 	-I$(abs_top_srcdir)/riscv-tests/env \
-	-I$(abs_top_srcdir) \
+	-I$(abs_top_srcdir)/include/new \
 	-I$(BENCH_COMMON) \
 	-DID_STRING=$(ID_STRING) \
 

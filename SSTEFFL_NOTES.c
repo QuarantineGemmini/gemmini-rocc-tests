@@ -1,4 +1,6 @@
 // main todos:
+// TODO: why do i have to do & 0xffffffff? otherwise, 
+//       D_acc_row_addr = 0xffffffff80000000, instead of 0x0000000180000000
 // TODO: add a bunch of asserts/debug/printf everywhere
 // TODO: enable error and warning messages 
 // TODO: make 2 new instructions to preload B and set C separately
