@@ -165,9 +165,9 @@ typedef struct gemmini {
 //============================================================================
 // create_gemmini subroutines
 //============================================================================
-gemmini_t static_self;
+static gemmini_t static_self;
 
-gemmini_t* 
+static gemmini_t* 
 init_gemmini_state(size_t M, size_t N, size_t K, 
                    mem_addr_t A, mem_addr_t B, mem_addr_t C, mem_addr_t D,
                    bool bias, bool repeating_bias) {
@@ -232,18 +232,18 @@ init_gemmini_state(size_t M, size_t N, size_t K,
 //============================================================================
 // create and destroy gemmini: hides implementation details. NO 
 //============================================================================
-gemmini_t* 
+static gemmini_t* 
 create_gemmini(size_t M, size_t N, size_t K,
                const elem_t A[M][K], const elem_t B[K][N],
                const acc_t * D, elem_t C[M][N],
                int act, int shift, bool repeating_bias) {
 
   // define constants
-  const size_t DATAFLOW                  = WEIGHT_STATIONARY;
-  const size_t ACTIVATION                = act;
-  const size_t SYSTOLIC_OUTPUT_RSHIFT    = 0;
-  const size_t ACCUMULATOR_OUTPUT_RSHIFT = shift;
-  const size_t RELU6_INPUT_LSHIFT        = 0;
+  //const size_t DATAFLOW                  = WEIGHT_STATIONARY;
+  //const size_t ACTIVATION                = act;
+  //const size_t SYSTOLIC_OUTPUT_RSHIFT    = 0;
+  //const size_t ACCUMULATOR_OUTPUT_RSHIFT = shift;
+  //const size_t RELU6_INPUT_LSHIFT        = 0;
 
   // initialize state
   gemmini_t * self = init_gemmini_state(M, N, K,
@@ -252,17 +252,19 @@ create_gemmini(size_t M, size_t N, size_t K,
                                         (D != NULL), repeating_bias);
 
   // issue gemini commands
-  gemmini_config_ex(DATAFLOW,
-                    ACTIVATION, 
-                    SYSTOLIC_OUTPUT_RSHIFT, 
-                    ACCUMULATOR_OUTPUT_RSHIFT,
-                    RELU6_INPUT_LSHIFT);
+  gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, 0);
+  gemmini_config_st(self->C_BYTES_PER_ROW);
+  //gemmini_config_ex(DATAFLOW,
+  //                  ACTIVATION, 
+  //                  SYSTOLIC_OUTPUT_RSHIFT, 
+  //                  ACCUMULATOR_OUTPUT_RSHIFT,
+  //                  RELU6_INPUT_LSHIFT);
 
   // state and hardware are now initialized
   return self;
 }
 
-void destroy_gemmini(gemmini_t *self) {
+static void destroy_gemmini(gemmini_t *self) {
   // nothing to do here
   return;
 }
@@ -270,7 +272,7 @@ void destroy_gemmini(gemmini_t *self) {
 //============================================================================
 // Tiling Loop #1 subroutines
 //============================================================================
-void reset_output_group(gemmini_t *self) {
+static void reset_output_group(gemmini_t *self) {
   // define mutable global state mutable by all loops, persist across all ogs
   self->gbl_tile_row          = 0;
   self->gbl_tile_col          = 0;
@@ -300,7 +302,7 @@ void reset_output_group(gemmini_t *self) {
   DBG_OG("reset_output_group");
 }
 
-bool next_output_group(gemmini_t *self) {
+static bool next_output_group(gemmini_t *self) {
   bool did_row_incr = false;
   bool did_col_incr = false;
 
@@ -360,7 +362,7 @@ bool next_output_group(gemmini_t *self) {
 // Tiling Loop #2 subroutines
 //============================================================================
 
-void reset_A_tile_subcol(gemmini_t *self) {
+static void reset_A_tile_subcol(gemmini_t *self) {
   // this scope modifies: self->gbl_B_cur_sp_row_addr;
   //                      self->gbl_B_alt_sp_row_addr;
   //                      self->gbl_CD_acc_row_addr
@@ -378,7 +380,7 @@ void reset_A_tile_subcol(gemmini_t *self) {
   DBG_LOOP("  reset_A_tile_subcol              ");
 }
 
-bool next_A_tile_subcol(gemmini_t *self) {
+static bool next_A_tile_subcol(gemmini_t *self) {
   if(self->loop2_k_tile_col == self->K_TILE_COL_END) {
     // we just accumulated the last A-column into the output-group. were done
     DBG_LOOP("<-next_A_tile_subcol               ");
@@ -403,7 +405,7 @@ bool next_A_tile_subcol(gemmini_t *self) {
   return true;
 }
 
-void move_first_B_tile_into_sp(gemmini_t *self) {
+static void move_first_B_tile_into_sp(gemmini_t *self) {
   // calculate mvin parameters
   const size_t B_mem_addr    = self->loop2_B_mem_addr;
   const size_t B_mem_stride  = self->B_BYTES_PER_ROW;
@@ -419,7 +421,7 @@ void move_first_B_tile_into_sp(gemmini_t *self) {
 // Tiling Loop #3 subroutines
 //============================================================================
 
-void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
+static void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
   // this scope modifies: self->gbl_tile_col
   //                      self->gbl_tile_row
   //                      self->gbl_CD_acc_row_addr
@@ -434,7 +436,7 @@ void reset_B_tile_subcol_in_subrow(gemmini_t *self) {
   DBG_LOOP("    reset_B_tile_subcol_in_subrow  ");
 }
 
-bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
+static bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
   if(self->gbl_tile_col == self->loop1_tile_col_end) {
     // we have already done the last column in the output-group, so were done
     DBG_LOOP("  <-next_B_tile_subcol_in_subrow   ");
@@ -459,7 +461,7 @@ bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
   return true;
 }
 
-void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
+static void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
   if(self->gbl_tile_col == self->loop1_tile_col_end) {
     // can't load next B-tile if we are already on the last one
     return;
@@ -481,7 +483,7 @@ void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
 // Tiling Loop #4 subroutines
 //============================================================================
 
-void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
+static void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
   // this scope modifies: self->gbl_tile_row
   //                      self->gbl_CD_acc_row_addr
 
@@ -495,7 +497,7 @@ void reset_A_tile_subrow_in_subcol(gemmini_t *self) {
   DBG_LOOP("      reset_A_tile_subrow_in_subcol");
 }
 
-bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
+static bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
   if(self->gbl_tile_row == self->loop1_tile_row_end) {
     // just finished the final row of tiles in the 4th loop, so were done
     DBG_LOOP("    <-next_A_tile_subrow_in_subcol ");
@@ -517,7 +519,7 @@ bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
   return true;
 }
 
-void maybe_move_A_tile_into_sp(gemmini_t *self) {
+static void maybe_move_A_tile_into_sp(gemmini_t *self) {
   if(self->gbl_tile_col != self->loop1_tile_col_start) {
     // only move A-tiles in during first column of tiles in the output-group
     return;
@@ -534,7 +536,7 @@ void maybe_move_A_tile_into_sp(gemmini_t *self) {
   gemmini_mvin(A_mem_addr, A_sp_row_addr);
 }
 
-void maybe_move_D_tile_into_acc(gemmini_t *self) {
+static void maybe_move_D_tile_into_acc(gemmini_t *self) {
   if(!(self->loop2_k_tile_col == 0 && self->HAS_BIAS)) {
     // only move D-tiles in during first partial-sum in an output-group
     return;
@@ -552,7 +554,7 @@ void maybe_move_D_tile_into_acc(gemmini_t *self) {
   gemmini_mvin(D_mem_addr, D_acc_row_addr);
 }
 
-void preload_B_tile_into_array_and_set_C_addr_in_acc(gemmini_t *self) {
+static void preload_B_tile_into_array_and_set_C_addr_in_acc(gemmini_t *self) {
   // on first tile in 4th loop: preload this B-tile
   // else:                      preload garbage B-tile (no scratchpad load)
   const size_t B_sp_row_addr = (self->gbl_tile_row == 
@@ -571,7 +573,7 @@ void preload_B_tile_into_array_and_set_C_addr_in_acc(gemmini_t *self) {
   gemmini_preload(B_sp_row_addr, C_acc_row_addr);
 }
 
-void do_matmul(gemmini_t *self) {
+static void do_matmul(gemmini_t *self) {
   // calculate compute parameters
   const size_t A_sp_row_addr = self->loop4_A_sp_row_addr;
 
@@ -585,7 +587,7 @@ void do_matmul(gemmini_t *self) {
   }
 }
 
-void maybe_move_C_tile_into_mem(gemmini_t *self) {
+static void maybe_move_C_tile_into_mem(gemmini_t *self) {
   if(self->loop2_k_tile_col != self->K_TILE_COL_END) {
     // only move C-tiles out during last partial-sum in an output-group
     return;
@@ -598,19 +600,19 @@ void maybe_move_C_tile_into_mem(gemmini_t *self) {
 
   DBG_MVOUT_C;
   // issue gemmini commands
-  gemmini_config_st(C_mem_stride);
+  //gemmini_config_st(C_mem_stride);
   gemmini_mvout(C_mem_addr, C_acc_row_addr);
 }
 
 //============================================================================
 // Input Validation
 //============================================================================
-bool is_valid_to_continue(size_t M, size_t N, size_t K, 
-                          const elem_t A[M][K], 
-                          const elem_t B[K][N],
-                          const acc_t * D, elem_t C[M][N],
-                          int act, int shift, bool repeating_bias,
-                          enum tiled_matmul_type_t tiled_matmul_type) {
+static bool is_valid_to_continue(size_t M, size_t N, size_t K, 
+                                 const elem_t A[M][K], 
+                                 const elem_t B[K][N],
+                                 const acc_t * D, elem_t C[M][N],
+                                 int act, int shift, bool repeating_bias,
+                                 enum tiled_matmul_type_t tiled_matmul_type) {
   // validate inputs
   if(!(M % DIM == 0 && M > 0)) {
     printf("invalid M: %d, not multiple of %d\n", M, DIM);
@@ -641,13 +643,13 @@ bool is_valid_to_continue(size_t M, size_t N, size_t K,
 //============================================================================
 // Entry Point
 //============================================================================
-void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
-                       const elem_t A[dim_I][dim_K], 
-                       const elem_t B[dim_K][dim_J],
-                       const acc_t * D, elem_t C[dim_I][dim_J],
-                       int act, int shift, bool repeating_bias,
-                       enum tiled_matmul_type_t tiled_matmul_type) 
-{
+static void 
+tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
+                  const elem_t A[dim_I][dim_K], 
+                  const elem_t B[dim_K][dim_J],
+                  const acc_t * D, elem_t C[dim_I][dim_J],
+                  int act, int shift, bool repeating_bias,
+                  enum tiled_matmul_type_t tiled_matmul_type) {
   DBG("tiled_matmul_auto started M,N,K=(%d,%d,%d)\n", dim_I, dim_J, dim_K);
 
   // sanitize inputs before starting
