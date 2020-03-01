@@ -20,6 +20,9 @@
 #define ACC_ADDR_RD(addr)  (((2 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
 #define ACC_ADDR_NEW(addr) (((2 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
 #define ACC_ADDR_ACC(addr) (((3 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
+//#define ACC_ADDR_RD(addr)  ((2 << (ADDR_LEN - 2)) | (addr))
+//#define ACC_ADDR_NEW(addr) ((2 << (ADDR_LEN - 2)) | (addr))
+//#define ACC_ADDR_ACC(addr) ((3 << (ADDR_LEN - 2)) | (addr))
 
 #define MIN(a,b) ({ __typeof__ (a) _a = (a); \
                     __typeof__ (b) _b = (b); \
@@ -74,8 +77,9 @@
 //===========================================================================
 // state objects
 //===========================================================================
-typedef uint16_t  tile_t;
-typedef uint16_t  sp_row_t;
+typedef size_t    bytes_t;
+typedef size_t    tile_t;
+typedef size_t    sp_row_t;
 typedef uintptr_t mem_addr_t;
 
 typedef struct gemmini {
@@ -87,11 +91,11 @@ typedef struct gemmini {
   tile_t      TILE_COLS_PER_GROUP;    // num tiles wide is an output-group
   tile_t      TILE_ROWS_PER_GROUP;    // num tiles tall is an output-group
 
-  size_t      BYTE_ROWS_PER_TILE;     // num-rows of tile A,B,C,D
-  size_t      I_BYTE_COLS_PER_GROUP;  // byte-width of output-group A,B,C
-  size_t      O_BYTE_COLS_PER_GROUP;  // byte-width of output-group D
-  size_t      I_TILE_BYTE_WIDTH;      // byte-width of tile A,B,C
-  size_t      O_TILE_BYTE_WIDTH;      // byte-width of tile D
+  bytes_t     BYTE_ROWS_PER_TILE;     // num-rows of tile A,B,C,D
+  bytes_t     I_BYTE_COLS_PER_GROUP;  // byte-width of output-group A,B,C
+  bytes_t     O_BYTE_COLS_PER_GROUP;  // byte-width of output-group D
+  bytes_t     I_TILE_BYTE_WIDTH;      // byte-width of tile A,B,C
+  bytes_t     O_TILE_BYTE_WIDTH;      // byte-width of tile D
 
   //-------------------------------------
   // input data-specific global constants
@@ -102,14 +106,14 @@ typedef struct gemmini {
   mem_addr_t  B_MEM_ADDR;
   mem_addr_t  C_MEM_ADDR;
   mem_addr_t  D_MEM_ADDR;
-  size_t      A_BYTES_PER_TILE_ROW;   // bytes in A-matrix row * rows-per-tile
-  size_t      B_BYTES_PER_TILE_ROW;
-  size_t      C_BYTES_PER_TILE_ROW;
-  size_t      D_BYTES_PER_TILE_ROW;
-  size_t      A_BYTES_PER_ROW;        // bytes in A-matrix row
-  size_t      B_BYTES_PER_ROW;
-  size_t      C_BYTES_PER_ROW;
-  size_t      D_BYTES_PER_ROW;
+  bytes_t     A_BYTES_PER_TILE_ROW;   // bytes in A-matrix row * rows-per-tile
+  bytes_t     B_BYTES_PER_TILE_ROW;
+  bytes_t     C_BYTES_PER_TILE_ROW;
+  bytes_t     D_BYTES_PER_TILE_ROW;
+  bytes_t     A_BYTES_PER_ROW;        // bytes in A-matrix row
+  bytes_t     B_BYTES_PER_ROW;
+  bytes_t     C_BYTES_PER_ROW;
+  bytes_t     D_BYTES_PER_ROW;
 
   tile_t      TILE_COL_END;           // last x tile index in C matrix
   tile_t      TILE_ROW_END;           // last y tile index in C matrix
@@ -537,7 +541,7 @@ static void maybe_move_A_tile_into_sp(gemmini_t *self) {
 }
 
 static void maybe_move_D_tile_into_acc(gemmini_t *self) {
-  if(!(self->loop2_k_tile_col == 0 && self->HAS_BIAS)) {
+  if(!((self->loop2_k_tile_col == 0) && self->HAS_BIAS)) {
     // only move D-tiles in during first partial-sum in an output-group
     return;
   }
@@ -565,7 +569,7 @@ static void preload_B_tile_into_array_and_set_C_addr_in_acc(gemmini_t *self) {
   // if has D-bias already loaded: accumulate c in accumulator
   // elif first k-col in 2nd loop: overwrite c in accumulator
   // else:                         accumulate c in accumulator
-  const size_t C_acc_row_addr = self->HAS_BIAS || self->loop2_k_tile_col > 0 ?
+  const size_t C_acc_row_addr = self->HAS_BIAS || (self->loop2_k_tile_col > 0) ?
                                 ACC_ADDR_ACC(self->gbl_CD_acc_row_addr) :
                                 ACC_ADDR_NEW(self->gbl_CD_acc_row_addr);
   DBG_PRELOAD_B;
@@ -573,7 +577,7 @@ static void preload_B_tile_into_array_and_set_C_addr_in_acc(gemmini_t *self) {
   gemmini_preload(B_sp_row_addr, C_acc_row_addr);
 }
 
-static void do_matmul(gemmini_t *self) {
+static void do_matmul(const gemmini_t *self) {
   // calculate compute parameters
   const size_t A_sp_row_addr = self->loop4_A_sp_row_addr;
 
