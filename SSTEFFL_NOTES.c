@@ -1,4 +1,10 @@
 // main todos:
+// TODO: firesim worker runs forever at 100% CPU if invalid memory accesses are
+//       done. Spike will exit immediately due to out-of-range exception, but
+//       firesim simulates the actual hardware, so that never happens. i NEED
+//       to figure out how to abort a firesim sim partway through
+// TODO: D<->C untracked dependency bug in ROB since they are in different
+//       address spaces??? is this a real bug, or is it a non-issue?
 // TODO: why do i have to do & 0xffffffff? otherwise, 
 //       D_acc_row_addr = 0xffffffff80000000, instead of 0x0000000180000000
 // TODO: add a bunch of asserts/debug/printf everywhere
@@ -21,6 +27,18 @@
 //       the input size. This is why the C_matrix is of elem_t, and not acc_t
 //
 // other TODO's
+// TODO: ALL MY HARDWARE CHANGES WERE NOT WORTH IT!!! The AGFI-id is baked
+//       into the config_hwdb.ini file, so even if i convert the chisel to
+//       the fpga-verilog, that is NOT the agfi image i will run. fuck.
+// TODO: you can't simply change your workload and quickly re-run firesim, you
+//       have to re-build the kernel image with the new benchmarks on it!!!
+//       a better idea would be to git-clone, then build within the simulated
+//       image, but then it needs your github credentials baked into it (unless
+//       its a public repo). anyways, incremental software changes take forever
+//       and this sucks
+// TODO: when is firesim worth it. it takes 10-20 minutes to recompile, then
+//       start the simulation. if the simulation only takes 20 minutes on 
+//       vcs, its probably not worth it to run in firesim.
 // TODO: should we enable bias D-matrices with element size of elem_t instead
 //       of acc_t? the bias matrix would be smaller, but then we wouldn't
 //       be able to load it into the accumulator
