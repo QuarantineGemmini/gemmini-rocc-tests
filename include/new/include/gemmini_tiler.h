@@ -102,6 +102,12 @@ typedef struct gemmini {
   bool        HAS_BIAS;               // if computing A*B+D=C, not A*B=C
   bool        REPEATING_BIAS;         // if HAS_BIAS, repeat 1st row only
 
+  int         DATAFLOW;
+  int         ACTIVATION;
+  int         SYSTOLIC_OUT_RSHIFT;
+  int         ACC_OUT_RSHIFT;
+  int         RELU6_IN_LSHIFT;
+
   mem_addr_t  A_MEM_ADDR;             // mem-addr of A-matrix
   mem_addr_t  B_MEM_ADDR;
   mem_addr_t  C_MEM_ADDR;
@@ -174,7 +180,7 @@ static gemmini_t static_self;
 static gemmini_t* 
 init_gemmini_state(size_t M, size_t N, size_t K, 
                    mem_addr_t A, mem_addr_t B, mem_addr_t C, mem_addr_t D,
-                   bool bias, bool repeating_bias) {
+                   int act, int shift, bool bias, bool repeating_bias) {
   // create the state struct
   gemmini_t *self = &static_self;
   memset(self, 0, sizeof(gemmini_t));
@@ -213,6 +219,12 @@ init_gemmini_state(size_t M, size_t N, size_t K,
   self->HAS_BIAS              = bias;
   self->REPEATING_BIAS        = repeating_bias;
 
+  self->DATAFLOW              = WEIGHT_STATIONARY;
+  self->ACTIVATION            = act;
+  self->SYSTOLIC_OUT_RSHIFT   = 0;
+  self->ACC_OUT_RSHIFT        = shift;
+  self->RELU6_IN_LSHIFT       = 0;
+
   self->A_MEM_ADDR            = A;
   self->B_MEM_ADDR            = B;
   self->C_MEM_ADDR            = C;
@@ -241,28 +253,18 @@ create_gemmini(size_t M, size_t N, size_t K,
                const elem_t A[M][K], const elem_t B[K][N],
                const acc_t * D, elem_t C[M][N],
                int act, int shift, bool repeating_bias) {
-
-  // define constants
-  //const size_t DATAFLOW                  = WEIGHT_STATIONARY;
-  //const size_t ACTIVATION                = act;
-  //const size_t SYSTOLIC_OUTPUT_RSHIFT    = 0;
-  //const size_t ACCUMULATOR_OUTPUT_RSHIFT = shift;
-  //const size_t RELU6_INPUT_LSHIFT        = 0;
-
   // initialize state
   gemmini_t * self = init_gemmini_state(M, N, K,
                                         (mem_addr_t) A, (mem_addr_t) B,
                                         (mem_addr_t) C, (mem_addr_t) D,
+                                        act, shift,
                                         (D != NULL), repeating_bias);
 
   // issue gemini commands
-  gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, 0);
+  gemmini_config_ex(self->DATAFLOW, self->ACTIVATION, 
+                    self->SYSTOLIC_OUT_RSHIFT, self->ACC_OUT_RSHIFT, 
+                    self->RELU6_IN_LSHIFT);
   gemmini_config_st(self->C_BYTES_PER_ROW);
-  //gemmini_config_ex(DATAFLOW,
-  //                  ACTIVATION, 
-  //                  SYSTOLIC_OUTPUT_RSHIFT, 
-  //                  ACCUMULATOR_OUTPUT_RSHIFT,
-  //                  RELU6_INPUT_LSHIFT);
 
   // state and hardware are now initialized
   return self;
@@ -682,6 +684,11 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
           } while(next_A_tile_subrow_in_subcol(self));
         } while(next_B_tile_subcol_in_subrow(self));
       } while(next_A_tile_subcol(self));
+      // TODO: bug. using this to synchronize
+      FIX-ME THIS DOESN"T DO AANYTHING USEFUL
+      gemmini_config_ex(self->DATAFLOW, self->ACTIVATION, 
+                        self->SYSTOLIC_OUT_RSHIFT, self->ACC_OUT_RSHIFT, 
+                        self->RELU6_IN_LSHIFT);
     } while(next_output_group(self));
 
     // cleanup the state object
