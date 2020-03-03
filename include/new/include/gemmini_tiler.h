@@ -20,9 +20,6 @@
 #define ACC_ADDR_RD(addr)  (((2 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
 #define ACC_ADDR_NEW(addr) (((2 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
 #define ACC_ADDR_ACC(addr) (((3 << (ADDR_LEN - 2)) | (addr)) & 0xffffffff)
-//#define ACC_ADDR_RD(addr)  ((2 << (ADDR_LEN - 2)) | (addr))
-//#define ACC_ADDR_NEW(addr) ((2 << (ADDR_LEN - 2)) | (addr))
-//#define ACC_ADDR_ACC(addr) ((3 << (ADDR_LEN - 2)) | (addr))
 
 #define MIN(a,b) ({ __typeof__ (a) _a = (a); \
                     __typeof__ (b) _b = (b); \
@@ -102,11 +99,11 @@ typedef struct gemmini {
   bool        HAS_BIAS;               // if computing A*B+D=C, not A*B=C
   bool        REPEATING_BIAS;         // if HAS_BIAS, repeat 1st row only
 
-  int         DATAFLOW;
-  int         ACTIVATION;
-  int         SYSTOLIC_OUT_RSHIFT;
-  int         ACC_OUT_RSHIFT;
-  int         RELU6_IN_LSHIFT;
+  int         DATAFLOW;               // WS, OS, CPU
+  int         ACTIVATION;             // NONE, RELU, RELU6
+  int         SYSTOLIC_OUT_RSHIFT;    // shift before accumulating
+  int         ACC_OUT_RSHIFT;         // shift after accumulating (but before act)
+  int         RELU6_IN_LSHIFT;        // ???
 
   mem_addr_t  A_MEM_ADDR;             // mem-addr of A-matrix
   mem_addr_t  B_MEM_ADDR;
@@ -684,11 +681,6 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
           } while(next_A_tile_subrow_in_subcol(self));
         } while(next_B_tile_subcol_in_subrow(self));
       } while(next_A_tile_subcol(self));
-      // TODO: bug. using this to synchronize
-      FIX-ME THIS DOESN"T DO AANYTHING USEFUL
-      gemmini_config_ex(self->DATAFLOW, self->ACTIVATION, 
-                        self->SYSTOLIC_OUT_RSHIFT, self->ACC_OUT_RSHIFT, 
-                        self->RELU6_IN_LSHIFT);
     } while(next_output_group(self));
 
     // cleanup the state object
