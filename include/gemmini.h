@@ -111,6 +111,7 @@ int is_equal(elem_t x[DIM][DIM], elem_t y[DIM][DIM]) {
         for (size_t j = 0; j < dim_j; ++j) \
           if (x[i][j] != y[i][j]) { \
             result = 0; \
+            printf("C[%d][%d]=%d, gold[%d][%d]=%d\n", i, j, x[i][j], i, j, y[i][j]); \
             break; \
           } \
       result;})
@@ -462,6 +463,9 @@ void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
   }
 }
 
+#ifdef USE_CUSTOM_TILER
+  #include "include/gemmini_tiler.h"
+#else
 // This function runs a tiled matrix multiplication, with automatically
 // calculated tiling factors
 void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
@@ -482,6 +486,7 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         tile_I, tile_J, tile_K,
         tiled_matmul_type);
 }
+#endif // USE_CUSTOM_TILER
 
 #endif // SRC_MAIN_C_GEMMINI_H
 

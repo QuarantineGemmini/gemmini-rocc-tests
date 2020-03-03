@@ -1,4 +1,6 @@
-#!/bin/sh
+#!/bin/bash
+
+set -euo pipefail
 
 if [ ! -d "build" ] ; then
     autoconf && \

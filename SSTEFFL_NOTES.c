@@ -1,8 +1,20 @@
 // main todos:
+// TODO: chisel printf formatting is infuriating. i can't format that shit with pads
+// TODO: is there no way to get midas printf to work in a non-firesim build?
+// TODO: when enabling verbose logging in rocket-chip, i can't selectively
+//       turn off logging from the rocket core... it outputs shit every single
+//       cycle. i only want output from MY modules. rocket-chip should have
+//       printf-groups, which you can selectively enable. this needs a new
+//       printf-command in chisel, as well as in firrtl, and a new backend
+//       annotator. A grosser method would be to use annotations around your
+//       printf, or statement block
+// TODO: chisel elaboration fails with JavaNumberFormatException. There is no
+//       way for me to debug this... this is less helpful than a vendor tool
 // TODO: firesim worker runs forever at 100% CPU if invalid memory accesses are
 //       done. Spike will exit immediately due to out-of-range exception, but
 //       firesim simulates the actual hardware, so that never happens. i NEED
 //       to figure out how to abort a firesim sim partway through
+//
 // TODO: D<->C untracked dependency bug in ROB since they are in different
 //       address spaces??? is this a real bug, or is it a non-issue?
 // TODO: why do i have to do & 0xffffffff? otherwise, 
