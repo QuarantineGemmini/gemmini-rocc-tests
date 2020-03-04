@@ -463,7 +463,7 @@ void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
   }
 }
 
-#ifdef USE_CUSTOM_TILER
+#ifdef USE_FSM_TILER
   #include "include/gemmini_tiler.h"
 #else
 // This function runs a tiled matrix multiplication, with automatically
@@ -486,7 +486,7 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         tile_I, tile_J, tile_K,
         tiled_matmul_type);
 }
-#endif // USE_CUSTOM_TILER
+#endif // USE_FSM_TILER
 
 #endif // SRC_MAIN_C_GEMMINI_H
 
