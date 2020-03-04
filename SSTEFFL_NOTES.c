@@ -1,4 +1,9 @@
 // main todos:
+// TODO: create scratchpad->scratchpad move instruction. not sure what i'd use
+//       this for though
+// TODO: more powerful DMA semantics (stride, skip, count, repeat), which will
+//       enable doing im2col and col2im simply by reading memory in/out with 
+//       the DMA engine
 // TODO: chisel printf formatting is infuriating. i can't format that shit with pads
 // TODO: is there no way to get midas printf to work in a non-firesim build?
 // TODO: when enabling verbose logging in rocket-chip, i can't selectively
