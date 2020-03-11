@@ -144,6 +144,13 @@ uint64_t read_cycles() {
 #define k_FLUSH 7
 #define k_LOOP_WS 8
 
+// BETA ISA 
+#define k_ADDR_AB 10
+#define k_ADDR_CD 11
+#define k_SIZE0 12
+#define k_SIZE1 13
+#define k_RESET 14
+
 #define CONFIG_EX 0
 #define CONFIG_LD 1
 #define CONFIG_ST 2
@@ -171,7 +178,22 @@ uint64_t read_cycles() {
 #define gemmini_mvout(dram_addr, spad_addr) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, spad_addr, k_MVOUT)
 
+#define gemmini_config_addr_ab(A, B) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, A, B, k_ADDR_AB)
+
+#define gemmini_config_addr_cd(C, D) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, C, D, k_ADDR_CD)
+
+#define gemmini_config_size0(M, N) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, M, N, k_SIZE0)
+
+#define gemmini_config_size1(K) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, K, 0, k_SIZE1)
+
 // compute
+#define gemmini_compute() \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_COMPUTE_PRELOADED)
+
 #define gemmini_compute_preloaded(A, BD) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, A, BD, k_COMPUTE_PRELOADED)
 
@@ -181,6 +203,9 @@ uint64_t read_cycles() {
 // preload
 #define gemmini_preload(BD, C) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, BD, C, k_PRELOAD)
+
+#define gemmini_config_reset() \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_RESET)
 
 #define matmul_preload_zeros(C) \
   gemmini_preload(GARBAGE_ADDR, C)
