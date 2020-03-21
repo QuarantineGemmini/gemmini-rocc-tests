@@ -82,7 +82,7 @@ int main() {
 
   elem_t Out[DIM][DIM];
 
-#ifdef USE_GEMMINI2_ISA
+#ifdef USE_HW_TILER
   gemmini2_body(In, D, Identity, Out);
 #else
   gemmini1_body(In, D, Identity, Out);

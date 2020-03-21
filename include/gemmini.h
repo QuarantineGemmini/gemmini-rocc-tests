@@ -175,21 +175,21 @@ static void matmul_cpu(size_t dim_I, size_t dim_J, size_t dim_K,
 }
 
 //============================================================================
-// tiled_matmul() implementations
+// tiled_matmul_auto() implementations
 //============================================================================
 
 // General matmul which can be run with different dataflows, or on the CPU
 enum tiled_matmul_type_t {OS, WS, CPU};
 
-#ifdef USE_GEMMINI2_ISA
-  #include "include/gemmini2_isa.h"
+#ifdef USE_HW_TILER
+  #include "include/gemmini_tiler_hw.h"
 #else
 #ifdef USE_FSM_TILER
-  #include "include/gemmini_fsm_tiler.h"
+  #include "include/gemmini_tiler_fsm.h"
 #else
-  #include "include/gemmini_orig_tiler.h"
+  #include "include/gemmini_tiler_orig.h"
 #endif // USE_FSM_TILER
-#endif // USE_GEMMINI2_ISA
+#endif // USE_HW_TILER
 
 #endif // __GEMMINI_H__
 

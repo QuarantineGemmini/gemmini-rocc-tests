@@ -19,10 +19,13 @@ else
 	tests_linux = $(tests:=-linux)
 endif
 
-BENCH_COMMON    = $(abs_top_srcdir)/riscv-tests/benchmarks/common
-GEMMINI_HEADERS = $(abs_top_srcdir)/include/gemmini.h \
-									$(abs_top_srcdir)/include/gemmini_params.h \
-									$(abs_top_srcdir)/include/gemmini_tiler.h
+BENCH_COMMON    := $(abs_top_srcdir)/riscv-tests/benchmarks/common
+GEMMINI_HEADERS := $(abs_top_srcdir)/include/gemmini.h						\
+									 $(abs_top_srcdir)/include/gemmini_params.h			\
+									 $(abs_top_srcdir)/include/gemmini_isa.h				\
+									 $(abs_top_srcdir)/include/gemmini_tiler_orig.h	\
+									 $(abs_top_srcdir)/include/gemmini_tiler_fsm.h	\
+									 $(abs_top_srcdir)/include/gemmini_tiler_hw.h
 
 ID_STRING ?=
 LIBS ?=
