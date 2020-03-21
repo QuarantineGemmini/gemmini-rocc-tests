@@ -35,11 +35,12 @@
 //============================================================================
 // New Gemmini2 opcodes
 //============================================================================
-#define k_ADDR_AB 10
-#define k_ADDR_CD 11
-#define k_SIZE0 12
-#define k_SIZE1 13
-#define k_RESET 14
+#define k_ADDR_AB  10
+#define k_ADDR_CD  11
+#define k_SIZE0    12
+#define k_SIZE1    13
+#define k_RPT_BIAS 14
+#define k_RESET    15
 
 //============================================================================
 // config-opcode parameters
@@ -133,6 +134,10 @@
 
 #define gemmini_config_size1(K) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, K, 0, k_SIZE1)
+
+// [ssteffl] HACK: need better interface for repeating_bias!
+#define gemmini_config_repeating_bias(repeating_bias) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, repeating_bias, 0, k_RPT_BIAS)
 
 #define gemmini_compute() \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_COMPUTE_PRELOADED)

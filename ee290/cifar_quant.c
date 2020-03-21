@@ -10,6 +10,8 @@
 #include "cifar_quant_params.h"
 #include "cifar_quant_images.h"
 
+#define CHECK_RESULT 0
+
 int main (int argc, char * argv[]) {
 #ifndef BAREMETAL
     if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
@@ -17,6 +19,7 @@ int main (int argc, char * argv[]) {
       exit(1);
     }
 #endif
+    printf("there are %d args\n", argc);
 
     gemmini_flush(0);
 
@@ -48,6 +51,7 @@ int main (int argc, char * argv[]) {
         printf("usage: %s [-h] matmul_option [check]\n  matmul_option may be 'os', 'ws', or cpu'\n", argv[0]);
         exit(1);
     }
+    check |= CHECK_RESULT;
 
     uint64_t start, end;
     uint64_t im2col_cycles = 0, matmul_cycles = 0, pool_cycles = 0, conv_dw_cycles = 0, res_add_cycles = 0, other_cycles = 0;

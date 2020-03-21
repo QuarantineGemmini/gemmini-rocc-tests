@@ -45,7 +45,8 @@ void gemmini2_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM],
   gemmini_config_addr_cd(Out, D);
   gemmini_config_size0(DIM, DIM);
   gemmini_config_size1(DIM);
-  gemmini_config_ex(OUTPUT_STATIONARY, 0, 0, 0, 0);
+  gemmini_config_repeating_bias(false);
+  gemmini_config_ex(WEIGHT_STATIONARY, 0, 0, 0, 0);
 
   printf("Multiply \"In\" matrix with \"Identity\" matrix with a bias of 0\n");
   gemmini_compute();
