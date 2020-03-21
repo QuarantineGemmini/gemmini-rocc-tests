@@ -1,18 +1,17 @@
+// See LICENSE for license details.
 //===========================================================================
-// This contains "tiled_matmul_auto", but implemented in a way that can
-// be easily converted to a FSM in RTL. I am doing this to pipeclean the
-// FSM's scheduling algorithm in software before doing it in hardware, to
-// get a rough idea of what the hardware performance might be.
+// - This contains "tiled_matmul_auto", but implemented in a way that can
+//   be easily converted to a FSM in RTL. I am doing this to pipeclean the
+//   FSM's scheduling algorithm in software before doing it in hardware, to
+//   get a rough idea of what the hardware performance might be.
+// - this doesn't need "#includes" since its included at the end of gemmini.h
 //===========================================================================
-#ifndef __GEMMINI_TILER_H__
-#define __GEMMINI_TILER_H__
+#ifndef __GEMMINI_FSM_TILER_H__
+#define __GEMMINI_FSM_TILER_H__
 
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
-
-#include "include/gemmini_params.h"
-#include "include/gemmini.h"
 
 //===========================================================================
 // convenient macros
@@ -689,5 +688,5 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
   gemmini_fence();
 }
 
-#endif // __GEMMINI_TILER_H__
+#endif // __GEMMINI_FSM_TILER_H__
 
