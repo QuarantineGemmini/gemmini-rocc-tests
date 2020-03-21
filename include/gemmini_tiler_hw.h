@@ -75,10 +75,10 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
                           act, shift, repeating_bias, tiled_matmul_type)) {
     // [ssteffl] TODO: do we need to reset every time?
     // gemmini_reset();
-    gemmini_config_addr_ab(A, B);
-    gemmini_config_addr_cd(C, D);
-    gemmini_config_size0(I, J);
-    gemmini_config_size1(K);
+    gemmini_config_addr_ab((uintptr_t)A, (uintptr_t)B);
+    gemmini_config_addr_cd((uintptr_t)C, (uintptr_t)D);
+    gemmini_config_size0(dim_I, dim_J);
+    gemmini_config_size1(dim_K);
     // [ssteffl] TODO: we might also want input-stationary, instead of OS...
     gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, 0);
     gemmini_compute();

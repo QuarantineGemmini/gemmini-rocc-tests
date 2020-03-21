@@ -17,6 +17,9 @@
 #include <limits.h>
 #include <stdbool.h>
 
+#include "gemmini_params.h"
+#include "gemmini_isa.h"
+
 //============================================================================
 // miscellaneous utility functions
 //============================================================================

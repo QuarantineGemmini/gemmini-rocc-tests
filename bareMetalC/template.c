@@ -11,9 +11,10 @@
 #include "include/gemmini.h"
 
 //============================================================================
-void gemmini1_body(elem_t In[DIM][DIM],       elem_t D[DIM][DIM], 
+void gemmini1_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM], 
                    elem_t Identity[DIM][DIM], elem_t Out[DIM][DIM]) 
 {
+  printf("Configure Gemmini1 ISA\n");
   printf("Calculate the scratchpad addresses of all our matrices\n");
   printf("  Note: The scratchpad is \"row-addressed\", where each address contains one matrix row\n");
   size_t In_sp_addr = 0;
@@ -36,10 +37,10 @@ void gemmini1_body(elem_t In[DIM][DIM],       elem_t D[DIM][DIM],
 }
 
 //============================================================================
-void gemmini2_body(elem_t In[DIM][DIM],       elem_t D[DIM][DIM], 
+void gemmini2_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM], 
                    elem_t Identity[DIM][DIM], elem_t Out[DIM][DIM]) 
 {
-  printf("Configure Gemmini\n");
+  printf("Configure Gemmini2 ISA\n");
   gemmini_config_addr_ab(In, Identity);
   gemmini_config_addr_cd(Out, D);
   gemmini_config_size0(DIM, DIM);
