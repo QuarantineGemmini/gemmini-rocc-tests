@@ -144,12 +144,14 @@ uint64_t read_cycles() {
 #define k_FLUSH 7
 #define k_LOOP_WS 8
 
-// BETA ISA 
+// ---------------------------------------------------------------------------
+// Gemmini2 ISA 
 #define k_ADDR_AB 10
 #define k_ADDR_CD 11
 #define k_SIZE0 12
 #define k_SIZE1 13
 #define k_RESET 14
+// ---------------------------------------------------------------------------
 
 #define CONFIG_EX 0
 #define CONFIG_LD 1
@@ -178,6 +180,8 @@ uint64_t read_cycles() {
 #define gemmini_mvout(dram_addr, spad_addr) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, spad_addr, k_MVOUT)
 
+// ---------------------------------------------------------------------------
+// Gemmini2 ISA 
 #define gemmini_config_addr_ab(A, B) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, A, B, k_ADDR_AB)
 
@@ -189,6 +193,7 @@ uint64_t read_cycles() {
 
 #define gemmini_config_size1(K) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, K, 0, k_SIZE1)
+// ---------------------------------------------------------------------------
 
 // compute
 #define gemmini_compute() \

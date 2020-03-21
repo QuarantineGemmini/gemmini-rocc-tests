@@ -10,12 +10,54 @@
 #endif
 #include "include/gemmini.h"
 
+//============================================================================
+void gemmini1_body(elem_t In[DIM][DIM],       elem_t D[DIM][DIM], 
+                   elem_t Identity[DIM][DIM], elem_t Out[DIM][DIM]) 
+{
+  printf("Calculate the scratchpad addresses of all our matrices\n");
+  printf("  Note: The scratchpad is \"row-addressed\", where each address contains one matrix row\n");
+  size_t In_sp_addr = 0;
+  size_t Out_sp_addr = DIM;
+  size_t Identity_sp_addr = 2*DIM;
+
+  printf("Move \"In\" matrix from main memory into Gemmini's scratchpad\n");
+  gemmini_mvin(In, In_sp_addr);
+
+  printf("Move \"Identity\" matrix from main memory into Gemmini's scratchpad\n");
+  gemmini_mvin(Identity, Identity_sp_addr);
+
+  printf("Multiply \"In\" matrix with \"Identity\" matrix with a bias of 0\n");
+  gemmini_config_ex(OUTPUT_STATIONARY, 0, 0, 0, 0);
+  matmul_preload_zeros(Out_sp_addr);
+  gemmini_compute_preloaded(In_sp_addr, Identity_sp_addr);
+
+  printf("Move \"Out\" matrix from Gemmini's scratchpad into main memory\n");
+  gemmini_mvout(Out, Out_sp_addr);
+}
+
+//============================================================================
+void gemmini2_body(elem_t In[DIM][DIM],       elem_t D[DIM][DIM], 
+                   elem_t Identity[DIM][DIM], elem_t Out[DIM][DIM]) 
+{
+  printf("Configure Gemmini\n");
+  gemmini_config_addr_ab(In, Identity);
+  gemmini_config_addr_cd(Out, D);
+  gemmini_config_size0(DIM, DIM);
+  gemmini_config_size1(DIM);
+  gemmini_config_ex(OUTPUT_STATIONARY, 0, 0, 0, 0);
+
+  printf("Multiply \"In\" matrix with \"Identity\" matrix with a bias of 0\n");
+  gemmini_compute();
+
+}
+
+//============================================================================
 int main() {
 #ifndef BAREMETAL
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-      perror("mlockall failed");
-      exit(1);
-    }
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+    perror("mlockall failed");
+    exit(1);
+  }
 #endif
 
   printf("Flush Gemmini TLB of stale virtual addresses\n");
@@ -28,7 +70,7 @@ int main() {
     for (size_t j = 0; j < DIM; j++)
       In[i][j] = i+j;
   
-  elem_t D[DIM][DIM];
+  acc_t D[DIM][DIM];
   for (size_t i = 0; i < DIM; i++)
     for (size_t j = 0; j < DIM; j++)
       D[i][j] = 0;
@@ -40,15 +82,11 @@ int main() {
 
   elem_t Out[DIM][DIM];
 
-  printf("Configure Gemmini\n");
-  gemmini_config_addr_ab(In, Identity);
-  gemmini_config_addr_cd(Out, D);
-  gemmini_config_size0(DIM, DIM);
-  gemmini_config_size1(DIM);
-  gemmini_config_ex(OUTPUT_STATIONARY, 0, 0, 0, 0);
-
-  printf("Multiply \"In\" matrix with \"Identity\" matrix with a bias of 0\n");
-  gemmini_compute();
+#ifdef USE_GEMMINI2_ISA
+  gemmini2_body(In, D, Identity, Out);
+#else
+  gemmini1_body(In, D, Identity, Out);
+#endif
 
   printf("Fence till Gemmini completes all memory operations\n");
   gemmini_fence();
