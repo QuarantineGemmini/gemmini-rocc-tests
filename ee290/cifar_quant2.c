@@ -10,6 +10,8 @@
 #include "cifar_quant_params.h"
 #include "cifar_quant_images.h"
 
+#define CHECK_RESULT 0
+
 int main (int argc, char * argv[]) {
 #ifndef BAREMETAL
     if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
@@ -40,6 +42,7 @@ int main (int argc, char * argv[]) {
         printf("Unknown command-line argument\n");
         exit(1);
     }
+    check |= CHECK_RESULT;
 
     unsigned long start, end;
     unsigned long im2col_cycles = 0, matmul_cycles = 0, pool_cycles = 0 , other_cycles = 0;

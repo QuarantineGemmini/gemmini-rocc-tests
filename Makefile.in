@@ -6,7 +6,8 @@ abs_top_srcdir := @abs_top_srcdir@
 XLEN           := @XLEN@
 ROCC 					 := examples
 #CATEGORIES     := bareMetalC ee290 mlps imagenet 
-CATEGORIES     := bareMetalC ee290
+#CATEGORIES     := bareMetalC ee290
+CATEGORIES     := bareMetalC ee290 imagenet
 
 #=============================================================================
 # targets
