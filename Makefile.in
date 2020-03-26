@@ -17,7 +17,8 @@ all: $(CATEGORIES)
 $(CATEGORIES):
 	mkdir -p $@
 	make -C $@	\
-		-f $(abs_top_srcdir)/$@/Makefile \
+		-f $(abs_top_srcdir)/header.mk \
+		TARGET_MAKEFILE=$(abs_top_srcdir)/$@/Makefile \
 		abs_top_srcdir=$(abs_top_srcdir) \
 	 	src_dir=$(abs_top_srcdir)/$@ \
 	 	XLEN=$(XLEN) \
