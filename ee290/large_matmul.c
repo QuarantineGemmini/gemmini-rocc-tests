@@ -5,9 +5,9 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
-#ifndef BAREMETAL
-#include <sys/mman.h>
-#endif
+//#ifndef BAREMETAL
+//#include <sys/mman.h>
+//#endif
 #include "include/gemmini.h"
 
 #define CHECK_RESULT 1
@@ -64,12 +64,12 @@ void full_matshift(int64_t full[DIM_I][DIM_J], elem_t out[DIM_I][DIM_J], int shi
 } 
 
 int main() {
-#ifndef BAREMETAL
-  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-    perror("mlockall failed");
-    exit(1);
-  }
-#endif
+//#ifndef BAREMETAL
+//  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+//    perror("mlockall failed");
+//    exit(1);
+//  }
+//#endif
 
   gemmini_flush(0);
 
