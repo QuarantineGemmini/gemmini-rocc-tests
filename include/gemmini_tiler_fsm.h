@@ -661,6 +661,7 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
     gemmini_t *self = create_gemmini(dim_I, dim_J, dim_K, A, B, D, C, 
                                      act, shift, repeating_bias);
     // actually do the tiled matmul
+    pin_matrices(dim_I, dim_J, dim_K, A, B, D, C, repeating_bias);
     reset_output_group(self);
     do {
       reset_A_tile_subcol(self);
@@ -684,6 +685,7 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
 
     // cleanup the state object
     destroy_gemmini(self);
+    unpin_matrices();
   }
   gemmini_fence();
 }

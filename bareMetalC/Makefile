@@ -1,4 +1,5 @@
 #tests = \
+# echo \
 #	mvin_mvout \
 #	mvin_mvout_stride \
 #	mvin_mvout_acc \

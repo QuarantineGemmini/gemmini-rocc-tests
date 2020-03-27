@@ -1,9 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-#ifndef BAREMETAL
-#include <sys/mman.h>
-#endif
+
 #include "include/gemmini.h"
 #include "include/gemmini_nn.h"
 
@@ -13,13 +11,6 @@
 #define CHECK_RESULT 0
 
 int main (int argc, char * argv[]) {
-#ifndef BAREMETAL
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-      perror("mlockall failed");
-      exit(1);
-    }
-#endif
-
     gemmini_flush(0);
 
     enum tiled_matmul_type_t tiled_matmul_type;

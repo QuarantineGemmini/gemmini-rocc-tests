@@ -51,7 +51,8 @@ GEMMINI_HEADERS := $(abs_top_srcdir)/include/gemmini.h						\
 									 $(abs_top_srcdir)/include/gemmini_isa.h				\
 									 $(abs_top_srcdir)/include/gemmini_tiler_orig.h	\
 									 $(abs_top_srcdir)/include/gemmini_tiler_fsm.h	\
-									 $(abs_top_srcdir)/include/gemmini_tiler_hw.h
+									 $(abs_top_srcdir)/include/gemmini_tiler_hw.h		\
+									 $(abs_top_srcdir)/include/gemmini_nn.h 
 
 ID_STRING ?=
 LIBS ?=
@@ -65,7 +66,6 @@ CFLAGS_ALL := \
 	-mcmodel=medany \
 	-std=gnu99 \
 	-ffast-math \
-	-fbranch-probabilities \
 	-march=rv64gc \
 	-lm \
 	-lgcc \
@@ -76,7 +76,7 @@ CFLAGS_ALL := \
 
 CFLAGS_BAREMETAL := \
 	$(CFLAGS_ALL) \
-	-DBAREMETAL=1 \
+	-DGEMMINI_BAREMETAL=1 \
 	-O2 \
 	-I$(BENCH_COMMON) \
 	-fno-common \
@@ -88,11 +88,13 @@ CFLAGS_BAREMETAL := \
 
 CFLAGS_PK := \
 	$(CFLAGS_ALL) \
+	-DGEMMINI_PK=1 \
 	-O3 \
 	-static \
 
 CFLAGS_LINUX := \
 	$(CFLAGS_ALL) \
+	-DGEMMINI_LINUX=1 \
 	-O3 \
 
 #----------------------------------------------------------------------------

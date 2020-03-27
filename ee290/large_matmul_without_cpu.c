@@ -5,9 +5,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
-//#ifndef BAREMETAL
-//#include <sys/mman.h>
-//#endif
+
 #include "include/gemmini.h"
 
 #define CHECK_RESULT 0
@@ -64,13 +62,6 @@ void full_matshift(int64_t full[DIM_I][DIM_J], elem_t out[DIM_I][DIM_J], int shi
 } 
 
 int main() {
-//#ifndef BAREMETAL
-//  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-//    perror("mlockall failed");
-//    exit(1);
-//  }
-//#endif
-
   gemmini_flush(0);
 
   static elem_t full_A[DIM_I][DIM_K] row_align(1);
@@ -112,20 +103,6 @@ int main() {
                     full_A, full_B, NULL, full_C,
                     NO_ACTIVATION, 0, false, // activation, shift, repeating_bias
                     WS);
-
-  /* To run with hardcoded tiling factors, you can use this function instead:
-
-  const size_t tile_I = 1;
-  const size_t tile_J = 1;
-  const size_t tile_K = 1;
-
-  tiled_matmul(DIM_I, DIM_J, DIM_K,
-               full_A, full_B, NULL, full_C,
-               NO_ACTIVATION, 0, false, // activation, shift, repeating_bias
-               tile_I, tile_J, tile_K,
-               WS);
-
-  */
 
   uint64_t end = read_cycles();
   printf("Cycles taken by Gemmini: %llu\n", end-start);

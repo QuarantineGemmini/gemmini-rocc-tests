@@ -4,9 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
-#ifndef BAREMETAL
-#include <sys/mman.h>
-#endif
 #include "include/gemmini.h"
 
 struct ConvParams {

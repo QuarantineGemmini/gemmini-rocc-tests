@@ -225,10 +225,12 @@ void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
       printf("Output-stationary dataflow unsupported for EE290 class\n");
       exit(1);
   } else if (tiled_matmul_type == WS) {
+      pin_matrices(dim_I, dim_J, dim_K, A, B, D, C, repeating_bias);
       tiled_matmul_ws(dim_I, dim_J, dim_K,
               A, B, D, C,
               tile_I, tile_J, tile_K,
               act, shift, repeating_bias);
+      unpin_matrices();
   } else /*if (tiled_matmul_type == CPU)*/ {
       matmul_cpu(dim_I, dim_J, dim_K,
               A, B, D, C,

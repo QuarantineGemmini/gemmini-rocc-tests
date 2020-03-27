@@ -14,3 +14,4 @@ tests = \
 	large_matmul \
 	large_matmul_without_cpu \
 	very_large_matmul \
+ 	cifar_quant \

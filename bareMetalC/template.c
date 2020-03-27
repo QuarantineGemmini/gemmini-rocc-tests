@@ -74,11 +74,13 @@ int main() {
 
   elem_t Out[DIM][DIM];
 
+  pin_matrices(DIM, DIM, DIM, In, Identity, (const acc_t*)D, Out, false);
 #ifdef USE_HW_TILER
   gemmini2_body(In, D, Identity, Out);
 #else
   gemmini1_body(In, D, Identity, Out);
 #endif
+  unpin_matrices();
 
   printf("Fence till Gemmini completes all memory operations\n");
   gemmini_fence();
