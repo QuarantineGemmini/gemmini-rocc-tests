@@ -23,6 +23,7 @@ void operands(int c, int * a, int * b, int * d) {
 int main() {
   static elem_t ZERO[DIM][DIM];
 
+  pin_all();
   gemmini_flush(0);
 
   static elem_t A[N][DIM][DIM] row_align(1);

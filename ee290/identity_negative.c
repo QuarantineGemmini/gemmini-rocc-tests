@@ -9,6 +9,7 @@
 #include "include/gemmini.h"
 
 int main() {
+    pin_all();
   // printf("Flush Gemmini TLB of stale virtual addresses\n");
   gemmini_flush(0);
 

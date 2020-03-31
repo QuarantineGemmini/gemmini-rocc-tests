@@ -29,25 +29,33 @@
 //   gemmini for accelerator-initiated page-fault handling, but this seems
 //   like a lot of work.
 //============================================================================
+static bool all_pinned = false;
+
 #ifdef GEMMINI_LINUX
 #include <sys/mman.h>
-static inline void pin_matrices(size_t M, size_t N, size_t K,
-        const elem_t A[M][K], const elem_t B[K][N],
-        const acc_t * D, elem_t C[M][N], bool repeating_bias) {
+static inline void pin_all() {
+  if(all_pinned) return;
+  all_pinned = true;
   if (mlockall(MCL_CURRENT) != 0) {
     perror("mlockall failed");
     exit(1);
   }
 }
-static inline void unpin_matrices() {
+static inline void unpin_all() {
+  if(!all_pinned) return;
+  all_pinned = false;
   if (munlockall()) {
     perror("munlockall failed");
     exit(1);
   }
 }
+#define pin_matrices(M,N,K,A,B,D,C,r) do {} while(0)
+#define unpin_matrices() do {} while(0)
 #else
 #ifdef GEMMINI_PK
 #define PAGESIZE 0x1000
+#define pin_all() do {} while(0)
+#define unpin_all() do {} while(0)
 static inline void __pin_vector(const char*vec, size_t len) {
   volatile char item[4];
   size_t i;
@@ -62,11 +70,12 @@ static inline void __pin_vector(const char*vec, size_t len) {
   if(i-1*PAGESIZE < len) item[2] = vec[i-1*PAGESIZE];
                          item[3] = vec[len-1];
 }
-
 static inline void pin_matrices(size_t M, size_t N, size_t K,
         const elem_t A[M][K], const elem_t B[K][N],
         const acc_t * D, elem_t C[M][N], bool repeating_bias) 
 {
+  // this is really inefficient, but we don't have mlockall() in newlib, so the
+  // best we can do is just touch every page before the accelerator uses it
   const char* A_vec = (const char*)A;
   const char* B_vec = (const char*)B;
   const char* C_vec = (const char*)C;
@@ -85,6 +94,8 @@ static inline void pin_matrices(size_t M, size_t N, size_t K,
 #define unpin_matrices() do {} while(0)
 #else 
 // GEMMINI_BAREMETAL
+#define pin_all() do {} while(0)
+#define unpin_all() do {} while(0)
 #define pin_matrices(M,N,K,A,B,D,C,r) do {} while(0)
 #define unpin_matrices() do {} while(0)
 #endif // GEMMINI_PK

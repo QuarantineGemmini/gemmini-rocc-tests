@@ -11,6 +11,7 @@
 #define N 2 // Number of matrix multiplications
 
 int main() {
+    pin_all();
   // Flush Gemmini TLB of stale virtual addresses
   gemmini_flush(0);
 

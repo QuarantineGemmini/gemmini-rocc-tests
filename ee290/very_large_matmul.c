@@ -61,6 +61,7 @@ void full_matshift(int64_t full[DIM_I][DIM_J], elem_t out[DIM_I][DIM_J], int shi
 } 
 
 int main() {
+  pin_all();
   gemmini_flush(0);
 
   static elem_t full_A[DIM_I][DIM_K] row_align(1);
