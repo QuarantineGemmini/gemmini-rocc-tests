@@ -8,6 +8,7 @@
 #include "parameters1.h"
 
 int main (int argc, char * argv[]) {
+    pin_all();
     gemmini_flush(0);
 
     enum tiled_matmul_type_t tiled_matmul_type;
