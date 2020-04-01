@@ -19,7 +19,8 @@ static void sp_tiled_matmul_ws(const elem_t * A, const elem_t * B,
         const acc_t * D, elem_t * C,
         size_t I, size_t J, size_t K, 
         size_t pad_I, size_t pad_J, size_t pad_K,
-        size_t A_row_len, size_t B_row_len, size_t D_row_len, size_t C_row_len,
+        size_t A_row_len, size_t B_row_len, 
+        size_t D_row_len, size_t C_row_len,
         bool no_bias, bool repeating_bias) 
 {
   const uint32_t A_sp_addr_start = 0;
@@ -39,7 +40,8 @@ static void sp_tiled_matmul_ws(const elem_t * A, const elem_t * B,
     for (size_t i = 0; i < I; i++) {
       for (size_t j = 0; j < J; j += D_blocks) {
         const size_t bias_row = repeating_bias ? 0 : i;
-        const acc_t * const D_dram_addr = (acc_t *)D + (bias_row * D_row_len + j)*DIM;
+        const acc_t * const D_dram_addr = (acc_t *)D + 
+                                          (bias_row * D_row_len + j)*DIM;
 
         const uint32_t D_sp_addr_acc = D_sp_addr_start + (i*J + j)*DIM;
 
@@ -149,15 +151,19 @@ static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
   const size_t dim_J_pad = round_up(dim_J, DIM);
   const size_t dim_K_pad = round_up(dim_K, DIM);
 
+  const size_t tiles_I_pad = dim_I_pad / DIM;
+  const size_t tiles_J_pad = dim_J_pad / DIM;
+  const size_t tiles_K_pad = dim_K_pad / DIM;
+
   // how many iterations for each direction
-  const size_t I0 = div_round_up(dim_I_pad, tile_I*DIM);
-  const size_t J0 = div_round_up(dim_J_pad, tile_J*DIM);
-  const size_t K0 = div_round_up(dim_K_pad, tile_K*DIM);
+  const size_t I0 = div_round_up(tiles_I_pad, tile_I);
+  const size_t J0 = div_round_up(tiles_J_pad, tile_J);
+  const size_t K0 = div_round_up(tiles_K_pad, tile_K);
 
   // how many tiles in the block for each direction in the LAST ITERATION
-  const size_t last_I = ((dim_I_pad / DIM) % tile_I) || tile_I;
-  const size_t last_J = ((dim_J_pad / DIM) % tile_J) || tile_J;
-  const size_t last_K = ((dim_K_pad / DIM) % tile_K) || tile_K;
+  const size_t last_I = default_if_zero(tiles_I_pad % tile_I, tile_I);
+  const size_t last_J = default_if_zero(tiles_J_pad % tile_J, tile_J);
+  const size_t last_K = default_if_zero(tiles_K_pad % tile_K, tile_K);
 
   // how much padding the hardware is supposed to add for the final tile
   const size_t pad_I = dim_I_pad - dim_I;
@@ -293,7 +299,7 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         int act, size_t shift, size_t relu6_shift, bool repeating_bias,
         enum tiled_matmul_type_t tiled_matmul_type)
 {
-  // [ssteffl] NOTE: this requires the output-group to be a square. inefficient
+  // [ssteffl] NOTE: this requires the output-group to be square. inefficient
   // for tall/skinny or wide/short output matrices.
   const size_t partition_rows    = BANK_NUM * BANK_ROWS / 2;
   const size_t mats_in_partition = partition_rows / DIM;
@@ -302,14 +308,14 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
   const size_t max_tile_k        = mats_in_partition / max_tile_i_j;
 
   // how many DIMxDIM tiles in each direction
-  const size_t dim_I_padded = ((dim_I + DIM - 1) / DIM);
-  const size_t dim_J_padded = ((dim_J + DIM - 1) / DIM);
-  const size_t dim_K_padded = ((dim_K + DIM - 1) / DIM);
+  const size_t tile_I_pad = div_round_up(dim_I, DIM);
+  const size_t tile_J_pad = div_round_up(dim_J, DIM);
+  const size_t tile_K_pad = div_round_up(dim_K, DIM);
 
   // how many tiles per matmul block (acc-output=IxJ, sp is 2-way split=Kx1)
-  const size_t tile_I = min(dim_I_padded, max_tile_i_j);
-  const size_t tile_J = min(dim_J_padded, max_tile_i_j);
-  const size_t tile_K = min(dim_K_padded, max_tile_k);
+  const size_t tile_I = min(tile_I_pad, max_tile_i_j);
+  const size_t tile_J = min(tile_J_pad, max_tile_i_j);
+  const size_t tile_K = min(tile_K_pad, max_tile_k);
 
   tiled_matmul(dim_I, dim_J, dim_K,
       A, B, D, C, act, shift, relu6_shift, repeating_bias,

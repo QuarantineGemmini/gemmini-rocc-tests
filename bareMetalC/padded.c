@@ -119,7 +119,8 @@ int main() {
             for (size_t k = 0; k < K; k++)
                 result += A[i][k] * B[k][j];
 
-            gold[i][j] = result < elem_t_min ? elem_t_min : (result > elem_t_max ? elem_t_max : result);
+            gold[i][j] = result < elem_t_min 
+              ? elem_t_min : (result > elem_t_max ? elem_t_max : result);
         }
 
     const size_t A_sp_addr = 0;

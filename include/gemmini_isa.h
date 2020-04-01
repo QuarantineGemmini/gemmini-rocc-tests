@@ -78,8 +78,9 @@
 // mvin
 #define gemmini_extended_mvin(dram_addr, spad_addr, cols, rows) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, \
-      ((uint64_t)(rows) << (ADDR_LEN + 16)) | \
-        ((uint64_t)(cols) << ADDR_LEN) | (spad_addr), \
+      ((uint64_t)  (rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(cols) <<  ADDR_LEN) | \
+        ((uint64_t)(spad_addr)), \
       k_MVIN)
 
 #define gemmini_mvin(dram_addr, spad_addr) \
@@ -91,8 +92,9 @@
 // mvout
 #define gemmini_extended_mvout(dram_addr, spad_addr, cols, rows) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, \
-      ((uint64_t)(rows) << (ADDR_LEN + 16)) | \
-        ((uint64_t)(cols) << ADDR_LEN) | (uint64_t)(spad_addr), \
+      ((uint64_t)  (rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(cols) <<  ADDR_LEN) | \
+        ((uint64_t)(spad_addr)), \
       k_MVOUT)
 
 #define gemmini_mvout(dram_addr, spad_addr) \
@@ -102,21 +104,21 @@
 #define gemmini_extended_compute_preloaded(A, BD, A_cols, A_rows, BD_cols, BD_rows) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
       ((uint64_t)  (A_rows) << (ADDR_LEN + 16)) | \
-        ((uint64_t)(A_cols) << ADDR_LEN) | \
-        (uint64_t) (A), \
+        ((uint64_t)(A_cols) <<  ADDR_LEN) | \
+        ((uint64_t)(A)), \
       ((uint64_t)  (BD_rows) << (ADDR_LEN + 16)) | \
-        ((uint64_t)(BD_cols) << ADDR_LEN) | \
-        (uint64_t) (BD), \
+        ((uint64_t)(BD_cols) <<  ADDR_LEN) | \
+        ((uint64_t)(BD)), \
       k_COMPUTE_PRELOADED)
 
 #define gemmini_extended_compute_accumulated(A, BD, A_cols, A_rows, BD_cols, BD_rows) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
       ((uint64_t)  (A_rows) << (ADDR_LEN + 16)) | \
         ((uint64_t)(A_cols) <<  ADDR_LEN) | \
-        (uint64_t) (A), \
+        ((uint64_t)(A)), \
       ((uint64_t)  (BD_rows) << (ADDR_LEN + 16)) | \
         ((uint64_t)(BD_cols) <<  ADDR_LEN) | \
-        (uint64_t) (BD), \
+        ((uint64_t)(BD)), \
       k_COMPUTE_ACCUMULATE)
 
 #define gemmini_compute_preloaded(A, BD) \

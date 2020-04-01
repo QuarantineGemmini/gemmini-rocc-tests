@@ -105,6 +105,11 @@ static inline void pin_matrices(size_t M, size_t N, size_t K,
 // miscellaneous utility functions
 //============================================================================
 
+#define default_if_zero(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   ((_a == 0) ? _b : _a); })
+
 #define round_up(a,b) \
  ({ __typeof__ (a) _a = (a); \
     __typeof__ (b) _b = (b); \

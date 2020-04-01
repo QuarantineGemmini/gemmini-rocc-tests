@@ -122,7 +122,7 @@ int main() {
   unsigned long start = read_cycles();
 
   tiled_matmul_auto(MAT_DIM_I, MAT_DIM_J, MAT_DIM_K,
-          full_A, full_B, NO_BIAS ? NULL : &full_D[0][0], full_C,
+          full_A, full_B, (NO_BIAS ? NULL : &full_D[0][0]), full_C,
           NO_ACTIVATION, 0, 0, false,
           WS);
 
