@@ -105,6 +105,26 @@ static inline void pin_matrices(size_t M, size_t N, size_t K,
 // miscellaneous utility functions
 //============================================================================
 
+#define round_up(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   (((_a + _b - 1) / _b) * _b); })
+
+#define div_round_up(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   ((_a + _b - 1) / _b); })
+
+#define min(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   _a <= _b ? _a : _b; })
+
+#define max(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   _a >= _b ? _a : _b; })
+
 // Matmul utility functions
 void matmul(elem_t A[DIM][DIM], elem_t B[DIM][DIM], elem_t D[DIM][DIM], int64_t C_full[DIM][DIM]) {
   for (size_t r = 0; r < DIM; r++)
@@ -227,11 +247,11 @@ uint64_t read_cycles() {
 }
 
 static void matmul_cpu(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J], const void * D,
+        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J], const acc_t * D,
         elem_t C[dim_I][dim_J],
-        int act, int shift, bool repeating_bias) {
-
-  const bool no_bias = D == NULL;
+        int act, size_t shift, size_t relu6_shift, bool repeating_bias) 
+{
+  const bool no_bias = (D == NULL);
 
   for (size_t i = 0; i < dim_I; i++) {
     for (size_t j = 0; j < dim_J; j++) {
@@ -246,13 +266,18 @@ static void matmul_cpu(size_t dim_I, size_t dim_J, size_t dim_K,
       result = ROUNDING_RIGHT_SHIFT(result, shift);
 
       // Clip result
-      result = result > elem_t_max ? elem_t_max : (result < elem_t_min ? elem_t_min : result);
+      result = (result > elem_t_max) 
+                ? elem_t_max 
+                : (result < elem_t_min ? elem_t_min : result);
 
       // Apply activation function
       if (act == RELU) {
         result = result < 0 ? 0 : result;
+      } 
+      else if (act == RELU6) {
+        int max = 6 << relu6_shift;
+        result = result < 0 ? 0 : (result > max ? max : result);
       }
-
       C[i][j] = (elem_t)result;
     }
   }
@@ -276,4 +301,3 @@ enum tiled_matmul_type_t {OS, WS, CPU};
 #endif // USE_HW_TILER
 
 #endif // __GEMMINI_H__
-
