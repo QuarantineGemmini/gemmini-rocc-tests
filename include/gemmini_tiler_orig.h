@@ -274,7 +274,7 @@ void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
 
   // Run a tiled matrix multiplication on either Gemmini or the CPU
   if (tiled_matmul_type == OS) {
-    printf("gemmini2 does not support output-stationary dataflow!\n");
+    printf("gemmini does not support output-stationary dataflow!\n");
     exit(1);
   } 
   else if(tiled_matmul_type == WS) {

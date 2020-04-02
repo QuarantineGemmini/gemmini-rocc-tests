@@ -147,16 +147,16 @@
 // weight-stationary matmul loop
 #define gemmini_loop_ws(A, B, I, J, K, bias) \
     ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
-        ((uint64_t)(B) << 32) | (A), \
-        ((uint64_t)(bias) << 48) | ((uint64_t)(K) << 32) | ((J) << 16) | (I), \
-        k_LOOP_WS)
+      ((uint64_t)(B) << 32) | (A), \
+      ((uint64_t)(bias) << 48) | ((uint64_t)(K) << 32) | ((J) << 16) | (I),\
+      k_LOOP_WS)
 
 // config
 #define gemmini_config_ex(mode, act, sys_shift, acc_shift, relu6_shift) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
-      ((uint64_t)(acc_shift) << 32) | ((act) << 3) | ((mode) << 2) | CONFIG_EX, \
-      ((uint64_t)(relu6_shift) << 32) | (sys_shift), \
-      k_CONFIG)
+    ((uint64_t)(acc_shift) << 32) | ((act) << 3) | ((mode) << 2) | CONFIG_EX,\
+    ((uint64_t)(relu6_shift) << 32) | (sys_shift), \
+    k_CONFIG)
 
 #define gemmini_config_ld(stride) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, CONFIG_LD, stride, k_CONFIG)

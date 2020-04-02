@@ -22,19 +22,18 @@
 //============================================================================
 // Input Validation
 //============================================================================
-static bool is_valid_to_continue(
-  size_t M, size_t N, size_t K, 
-  const elem_t A[M][K], const elem_t B[K][N],
-  const acc_t * D, elem_t C[M][N],
-  int act, int shift, bool repeating_bias,
-  enum tiled_matmul_type_t tiled_matmul_type) 
-{
+static bool is_valid_to_continue(size_t M, size_t N, size_t K, 
+                                 const elem_t A[M][K], const elem_t B[K][N],
+                                 const acc_t * D, elem_t C[M][N],
+                                 int act, size_t shift, 
+                                 size_t relu6_shift, bool repeating_bias,
+                                 enum tiled_matmul_type_t tiled_matmul_type) {
   // basic sanity checks
   if (tiled_matmul_type == OS) {
-    printf("Output-stationary dataflow unsupported!\n");
+    printf("gemmini does not support output-stationary dataflow!\n");
     exit(1);
   } else if (tiled_matmul_type == CPU) {
-    matmul_cpu(M, N, K, A, B, D, C, act, shift, repeating_bias);
+    matmul_cpu(M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
     return false;
   }
   return true;
@@ -48,13 +47,14 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
                   const elem_t A[dim_I][dim_K], 
                   const elem_t B[dim_K][dim_J],
                   const acc_t * D, elem_t C[dim_I][dim_J],
-                  int act, int shift, bool repeating_bias,
+                  int act, size_t shift, 
+                  size_t relu6_shift, bool repeating_bias,
                   enum tiled_matmul_type_t tiled_matmul_type) {
   DBG("tiled_matmul_auto started M,N,K=(%d,%d,%d)\n", dim_I, dim_J, dim_K);
 
   // sanitize inputs before starting
-  if(is_valid_to_continue(dim_I, dim_J, dim_K, A, B, D, C, 
-                          act, shift, repeating_bias, tiled_matmul_type)) {
+  if(is_valid_to_continue(dim_I, dim_J, dim_K, A, B, D, C, act, shift, 
+                          relu6_shift, repeating_bias, tiled_matmul_type)) {
     // [ssteffl] TODO: should we reset every time?
     gemmini_config_reset();
     gemmini_config_addr_ab((uintptr_t)A, (uintptr_t)B);
@@ -63,7 +63,7 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
     gemmini_config_size1(dim_K);
     gemmini_config_repeating_bias(repeating_bias);
     // [ssteffl] TODO: we might also want input-stationary, but not OS...
-    gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, 0);
+    gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, relu6_shift);
     gemmini_compute();
   }
   gemmini_fence();
