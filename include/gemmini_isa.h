@@ -154,8 +154,12 @@
 // config
 #define gemmini_config_ex(mode, act, sys_shift, acc_shift, relu6_shift) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
-    ((uint64_t)(acc_shift) << 32) | ((act) << 3) | ((mode) << 2) | CONFIG_EX,\
-    ((uint64_t)(relu6_shift) << 32) | (sys_shift), \
+    ((uint64_t)(acc_shift) << 32) | \
+      ((act) << 3) | \
+      ((mode) << 2) | \
+      CONFIG_EX,\
+    ((uint64_t)(relu6_shift) << 32) | \
+      (sys_shift), \
     k_CONFIG)
 
 #define gemmini_config_ld(stride) \
