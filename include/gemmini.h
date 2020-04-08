@@ -305,4 +305,12 @@ enum tiled_matmul_type_t {OS, WS, CPU};
 #endif // USE_FSM_TILER
 #endif // USE_HW_TILER
 
+void gemm_auto(size_t dim_I, size_t dim_J, size_t dim_K,
+        const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+        bool repeating_bias, enum tiled_matmul_type_t tiled_matmul_type) {
+  tiled_matmul_auto(dim_I, dim_J, dim_K, (elem_t[dim_I][dim_K])A, 
+    (elem_t[dim_K][dim_J])B, D, (elem_t[dim_I][dim_J])C, 
+    0,0,0,repeating_bias, tiled_matmul_type);
+}
+
 #endif // __GEMMINI_H__

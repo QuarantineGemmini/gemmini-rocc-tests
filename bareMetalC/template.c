@@ -54,7 +54,7 @@ void gemmini2_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM],
 int main() {
   pin_all();
   printf("Flush Gemmini TLB of stale virtual addresses\n");
-  //gemmini_flush(0);
+  gemmini_flush(0);
 
   printf("Initialize our input and output matrices in main memory\n");
   elem_t In[DIM][DIM];
@@ -81,10 +81,9 @@ int main() {
 #else
   gemmini1_body(In, D, Identity, Out);
 #endif
-  unpin_matrices();
-
   printf("Fence till Gemmini completes all memory operations\n");
   gemmini_fence();
+  unpin_matrices();
 
   printf("Check whether \"In\" and \"Out\" matrices are identical\n");
   if (!is_equal(In, Out)) {
