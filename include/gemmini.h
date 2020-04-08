@@ -17,8 +17,9 @@
 #include <limits.h>
 #include <stdbool.h>
 
-#include "gemmini_params.h"
-#include "gemmini_isa.h"
+#include "include/gemmini_params.h"
+#include "include/gemmini_isa.h"
+#include "include/util.h"
 
 //============================================================================
 // pk/linux page-fault prevention mechanisms
@@ -241,6 +242,7 @@ int rand() {
   return x >> 24;
 }
 
+# define INT_PCT(n, d) (100.0*(double)n/(double)d)
 uint64_t read_cycles() {
     uint64_t cycles;
     asm volatile ("rdcycle %0" : "=r" (cycles));
@@ -251,24 +253,25 @@ uint64_t read_cycles() {
     // return *mtime;
 }
 
-static void matmul_cpu(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J], const acc_t * D,
-        elem_t C[dim_I][dim_J],
-        int act, size_t shift, size_t relu6_shift, bool repeating_bias) 
+//============================================================================
+// do matmul with activation (and other bells & whistles) on cpu
+//============================================================================
+static void matmul_cpu_raw(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t *D, elem_t *C,
+  int act, size_t in_shift, size_t relu6_shift, bool repeating_bias) 
 {
   const bool no_bias = (D == NULL);
-
-  for (size_t i = 0; i < dim_I; i++) {
-    for (size_t j = 0; j < dim_J; j++) {
+  for (size_t i = 0; i < M; i++) {
+    for (size_t j = 0; j < N; j++) {
       size_t bias_row = repeating_bias ? 0 : i;
-      acc_t result = no_bias ? 0 : ((acc_t (*)[dim_J])D)[bias_row][j];
-
-      for (size_t k = 0; k < dim_K; k++) {
-        result += A[i][k] * B[k][j];
+      acc_t result = no_bias ? 0 : ((acc_t (*)[N])D)[bias_row][j];
+      for (size_t k = 0; k < K; k++) {
+        result += A[i*K + k] * B[k*N + j];
       }
-
-      // Shift while rounding to nearest integer (ties round to negative infinity)
-      result = ROUNDING_RIGHT_SHIFT(result, shift);
+      // Shift while rounding to nearest integer 
+      // (ties round to negative infinity)
+      result = ROUNDING_RIGHT_SHIFT(result, in_shift);
 
       // Clip result
       result = (result > elem_t_max) 
@@ -278,14 +281,25 @@ static void matmul_cpu(size_t dim_I, size_t dim_J, size_t dim_K,
       // Apply activation function
       if (act == RELU) {
         result = result < 0 ? 0 : result;
-      } 
+      }
       else if (act == RELU6) {
         int max = 6 << relu6_shift;
         result = result < 0 ? 0 : (result > max ? max : result);
       }
-      C[i][j] = (elem_t)result;
+      C[i*N + j] = (elem_t)result;
     }
   }
+}
+
+static void matmul_cpu(
+  size_t M, size_t N, size_t K,
+  const elem_t A[M][K], const elem_t B[K][N], const acc_t *D, elem_t C[M][N],
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias) 
+{
+  PRINT("DEPRECATED!!!!!!!!! matmul_cpu with 2-D matrix notation");
+  matmul_cpu_raw(
+    M, N, K, (const elem_t*)A, (const elem_t*)B, D, (elem_t*) C, 
+    act, shift, relu6_shift, repeating_bias);
 }
 
 //============================================================================
@@ -305,12 +319,25 @@ enum tiled_matmul_type_t {OS, WS, CPU};
 #endif // USE_FSM_TILER
 #endif // USE_HW_TILER
 
-void gemm_auto(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
-        bool repeating_bias, enum tiled_matmul_type_t tiled_matmul_type) {
-  tiled_matmul_auto(dim_I, dim_J, dim_K, (elem_t[dim_I][dim_K])A, 
-    (elem_t[dim_K][dim_J])B, D, (elem_t[dim_I][dim_J])C, 
-    0,0,0,repeating_bias, tiled_matmul_type);
+static void tiled_matmul_auto(
+  size_t M, size_t N, size_t K,
+  const elem_t A[M][K], const elem_t B[K][N],
+  const acc_t * D, elem_t C[M][N],
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias,
+  enum tiled_matmul_type_t mm_type)
+{
+  PRINT("DEPRECATED!!!!!!!!! tiled_matmul_auto with 2-D matrix notation");
+  tiled_matmul_auto_raw(
+    M, N, K, (const elem_t*)A, (const elem_t*)B, D, (elem_t*)C, 
+    act, shift, relu6_shift, repeating_bias, mm_type);
+}
+
+void gemm_auto(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  bool repeating_bias, enum tiled_matmul_type_t mm_type) 
+{
+  tiled_matmul_auto_raw(M, N, K, A, B, D, C, 0,0,0,repeating_bias, mm_type);
 }
 
 #endif // __GEMMINI_H__

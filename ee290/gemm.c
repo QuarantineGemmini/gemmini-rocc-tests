@@ -1,17 +1,24 @@
+// See LICENSE for license details.
+
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
 
 #include "include/gemmini.h"
-
-#include "include/get_real_time.h"
+#include "include/matrix_util.h"
 #include "include/util.h"
+
+#ifdef GEMMINI_BAREMETAL
+int main (int argc, char * argv[]) {
+  ERROR("gemm benchmark does not work on baremetal!");
+}
+# else
 
 //==========================================================================
 // usage message
 //==========================================================================
 void print_usage() {
-  print("\n\
+  printf("\n\
 \n\
  gemm [options] <M> <N> <K>\n\
  --------------\n\
@@ -49,14 +56,14 @@ int main (int argc, char * argv[]) {
   bool diag     = false;
   bool dump     = false;
 
-  double time_parse, time_init, time_pin, time_gemmini, time_cpu,
+  size_t time_parse, time_init, time_pin, time_gemmini, time_cpu,
          time_verify, time_all;
   bool success  = false;
   
   //-------------
   // parse args
   //-------------
-  time_parse = get_real_time();
+  time_parse = read_cycles();
   if(argc == 0) print_usage();
   if(argc < 4) ERROR("missing <M>, <N> or <K>. see usage with -h");
 
@@ -70,7 +77,7 @@ int main (int argc, char * argv[]) {
     else if(!strcmp(argv[i], "-zeros"))       zeros = true;
     else if(!strcmp(argv[i], "-diag"))        diag = true;
     else if(!strcmp(argv[i], "-dump"))        dump = true;
-    else if(!strcmp(argv[i], "%u", &tmp)) {
+    else if(!sscanf(argv[i], "%u", &tmp)) {
       if(tmp == 0) ERROR("cannot specify zero as an <M,N,K> dimension");
       else if(m == 0) m = tmp;
       else if(n == 0) n = tmp;
@@ -81,13 +88,13 @@ int main (int argc, char * argv[]) {
   }
   if (m==0 || n==0 || k==0) ERROR("you must specify all 3 <M,N,K> params!");
 
-  time_parse = get_real_time() - time_parse;
+  time_parse = read_cycles() - time_parse;
   DEBUG("parse time: %.6d (s)", time_parse);
 
   //---------------------
   // initialize matrices
   //---------------------
-  time_init = get_real_time();
+  time_init = read_cycles();
   elem_t *A = zeros    ? create_zero_matrix_i(m, k) :
               diag     ? create_diag_matrix_i(m, k) :
                          create_rand_matrix_i(m, k);
@@ -104,41 +111,51 @@ int main (int argc, char * argv[]) {
   elem_t *C_gemmini = create_zero_matrix_i(m, n);
   elem_t *C_gold = verify ? create_zero_matrix_i(m, n) : NULL;
 
-  time_init = get_real_time() - time_init;
+  if(dump) {
+    dump_matrix_i("A", A, m, k);
+    dump_matrix_i("B", B, k, n);
+    if(no_d) PRINT("D = NULL");
+    else if(repeat_d) dump_matrix_o("D", D, 1, n);
+    else dump_matrix_o("D", D, m, n);
+  }
+
+  time_init = read_cycles() - time_init;
   DEBUG("init time:  %.6d (s)", time_init);
 
   //---------------------
   // pin matrices
   //---------------------
-  time_pin = get_real_time();
+  time_pin = read_cycles();
   pin_all();
   gemmini_flush(0);
-  time_pin = get_real_time() - time_pin;
+  time_pin = read_cycles() - time_pin;
   DEBUG("pin time: %.6d (s)", time_pin);
 
   //---------------------
   // gemmini matmul
   //---------------------
-  time_gemmini = get_real_time();
-  gemm_auto(m, n, k, A, B, C_gemmini, D, repeat_D, WS);
+  time_gemmini = read_cycles();
+  gemm_auto(m, n, k, A, B, D, C_gemmini, repeat_d, WS);
   DEBUG("gemmini time: %.6d (s)", time_gemmini);
+  if(dump) dump_matrix_i("C_gemmini", C_gemmini, m, n);
 
   //---------------------
   // cpu matmul
   //---------------------
-  time_cpu = get_real_time();
-  if(verify) gemm_auto(m, n, k, A, B, C_gold, D, repeat_D, CPU);
-  time_cpu = get_real_time() - time_cpu;
+  time_cpu = read_cycles();
+  if(verify) gemm_auto(m, n, k, A, B, D, C_gold, repeat_d, CPU);
+  time_cpu = read_cycles() - time_cpu;
+  if(dump) dump_matrix_i("C_gold", C_gold, m, n);
   DEBUG("cpu time: %.6d (s)", time_cpu);
 
   //---------------------
   // verify matmul
   //---------------------
-  time_verify = get_real_time();
+  time_verify = read_cycles();
   if(verify) {
-    success = compare_matrices_o(C_gemmini, C_gold, m, n);
+    success = compare_matrices_i(C_gemmini, C_gold, m, n);
   }
-  time_verify = get_real_time() - time_verify;
+  time_verify = read_cycles() - time_verify;
   DEBUG("verify time: %.6d (s)", time_verify);
 
   //---------------------
@@ -147,16 +164,18 @@ int main (int argc, char * argv[]) {
   time_all = time_parse + time_init + time_pin + time_gemmini + 
              time_cpu + time_verify;
   PRINT("-----------------------------");
-  PRINT(" STATUS: %s", (status ? "PASS" : "FAIL"));
+  PRINT(" STATUS: %s", (success ? "PASS" : "FAIL"));
   PRINT("-----------------------------");
-  PRINT("total   (s,%): %.6f, %d", time_all,    100*(time_all     /time_all));
-  PRINT("parse   (s,%): %.6f, %d", time_parse,  100*(time_parse   /time_all));
-  PRINT("init    (s,%): %.6f, %d", time_init,   100*(time_init    /time_all));
-  PRINT("pin     (s,%): %.6f, %d", time_pin,    100*(time_pin     /time_all));
-  PRINT("gemmini (s,%): %.6f, %d", time_gemmini,100*(time_gemmini /time_all));
-  PRINT("cpu     (s,%): %.6f, %d", time_cpu,    100*(time_cpu     /time_all));
-  PRINT("verify  (s,%): %.6f, %d", time_verify, 100*(time_verify  /time_all));
+  PRINT("        %%,      (cycles)");
+  PRINT("total  :%10d, %u", time_all,    INT_PCT(time_all,    time_all));
+  PRINT("parse  :%10d, %u", time_parse,  INT_PCT(time_parse,  time_all));
+  PRINT("init   :%10d, %u", time_init,   INT_PCT(time_init,   time_all));
+  PRINT("pin    :%10d, %u", time_pin,    INT_PCT(time_pin,    time_all));
+  PRINT("gemmini:%10d, %u", time_gemmini,INT_PCT(time_gemmini,time_all));
+  PRINT("cpu    :%10d, %u", time_cpu,    INT_PCT(time_cpu,    time_all));
+  PRINT("verify :%10d, %u", time_verify, INT_PCT(time_verify, time_all));
 
   exit(success ? 0 : 1);
 }
 
+#endif // GEMMINI_BAREMETAL

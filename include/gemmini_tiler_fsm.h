@@ -13,6 +13,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "include/util.h"
+
 //===========================================================================
 // convenient macros
 //===========================================================================
@@ -27,53 +29,47 @@
 //===========================================================================
 // debugging printfs
 //===========================================================================
-#ifdef NODEBUG
-#define DBG(...)
-#else
-#define DBG(...) printf(__VA_ARGS__)
-#endif
-
 #define DBG_OG(name)                                                    \
-  DBG(name " = (%d,%d), (%d,%d)\n",                                     \
+  DEBUG(name " = (%d,%d), (%d,%d)",                                     \
       self->loop1_tile_col_start, self->loop1_tile_row_start,           \
       self->loop1_tile_col_end,   self->loop1_tile_row_end)
 
 #define DBG_LOOP(name)                                                  \
-  DBG(name " = (row,col,k), (%d,%d,%d)\n",                              \
+  DEBUG(name " = (row,col,k), (%d,%d,%d)",                              \
       self->gbl_tile_row, self->gbl_tile_col, self->loop2_k_tile_col)
 
 #define DBG_MVIN_B                                                      \
-  DBG("        mvin(B,stride=%u,mem=%x,sp=%u,rows=%u,cols=%u)\n",       \
+  DEBUG("        mvin(B,stride=%u,mem=%x,sp=%u,rows=%u,cols=%u)",       \
       B_mem_stride, B_mem_addr, B_sp_row_addr, B_item_rows, B_item_cols)
 
 #define DBG_MVIN_A                                                      \
-  DBG("        mvin(A,stride=%u,mem=%x,sp=%u,rows=%u,cols=%u)\n",       \
+  DEBUG("        mvin(A,stride=%u,mem=%x,sp=%u,rows=%u,cols=%u)",       \
       A_mem_stride, A_mem_addr, A_sp_row_addr, A_item_rows, A_item_cols)
 
 #define DBG_MVIN_D                                                      \
-  DBG("        mvin(D,stride=%u,mem=%x,acc=%u,%u,rows=%u,cols=%u)\n",   \
+  DEBUG("        mvin(D,stride=%u,mem=%x,acc=%u,%u,rows=%u,cols=%u)",   \
       D_mem_stride, D_mem_addr,                                         \
       (D_acc_row_addr >> 30) & 0x3, D_acc_row_addr & 0x3fffffff,        \
       D_item_rows, D_item_cols)
 
 #define DBG_PRELOAD_B                                                   \
-  DBG("        preload(B=%u,C=%u,%u,B(r,c)=(%u,%u),C(r,c)=(%u,%u))\n",  \
+  DEBUG("        preload(B=%u,C=%u,%u,B(r,c)=(%u,%u),C(r,c)=(%u,%u))",  \
       B_sp_row_addr,                                                    \
       (C_acc_row_addr >> 30) & 0x3, C_acc_row_addr & 0x3fffffff,        \
       B_item_rows, B_item_cols, C_item_rows, C_item_cols)
 
 #define DBG_COMPUTE_PRE                                                 \
-  DBG("        compute.pre(A=%u,D=%u,A(r,c)=(%u,%u),D(r,c)=(%u,%u))\n", \
+  DEBUG("        compute.pre(A=%u,D=%u,A(r,c)=(%u,%u),D(r,c)=(%u,%u))", \
       A_sp_row_addr, D_sp_row_addr,                                     \
       A_item_rows, A_item_cols, D_item_rows, D_item_cols)
 
 #define DBG_COMPUTE_ACC                                                 \
-  DBG("        compute.acc(A=%u,D=%u,A(r,c)=(%u,%u),D(r,c)=(%u,%u))\n", \
+  DEBUG("        compute.acc(A=%u,D=%u,A(r,c)=(%u,%u),D(r,c)=(%u,%u))", \
       A_sp_row_addr, D_sp_row_addr,                                     \
       A_item_rows, A_item_cols, D_item_rows, D_item_cols)
 
 #define DBG_MVOUT_C                                                     \
-  DBG("        mvout(C,stride=%u,mem=%x,acc=%u,%u,rows=%u,cols=%u)\n",  \
+  DEBUG("        mvout(C,stride=%u,mem=%x,acc=%u,%u,rows=%u,cols=%u)",  \
       C_mem_stride, C_mem_addr,                                         \
       (C_acc_row_addr >> 30) & 0x3, C_acc_row_addr & 0x3fffffff,        \
       C_item_rows, C_item_cols)
@@ -677,32 +673,19 @@ static void maybe_move_C_tile_into_mem(gemmini_t *self) {
 //============================================================================
 // Input Validation
 //============================================================================
-static bool is_valid_to_continue(size_t M, size_t N, size_t K, 
-                                 const elem_t A[M][K], 
-                                 const elem_t B[K][N],
-                                 const acc_t * D, elem_t C[M][N],
-                                 int act, size_t shift, 
-                                 size_t relu6_shift, bool repeating_bias,
-                                 enum tiled_matmul_type_t tiled_matmul_type) {
-  // validate inputs
-  if(M == 0) {
-    printf("invalid M: %d\n", M);
-    exit(1);
-  }
-  if(N == 0) {
-    printf("invalid N: %d\n", N);
-    exit(1);
-  }
-  if(K == 0) {
-    printf("invalid K: %d\n", K);
-    exit(1);
-  }
-
+static bool is_valid_to_continue(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias,
+  enum tiled_matmul_type_t mm_type) 
+{
   // basic sanity checks
-  if (tiled_matmul_type == OS) {
-    printf("gemmini does not support output-stationary dataflow!\n");
-    exit(1);
-  } else if (tiled_matmul_type == CPU) {
+  ASSERT(M > 0, "invalid M: %d", M);
+  ASSERT(N > 0, "invalid N: %d", N);
+  ASSERT(K > 0, "invalid K: %d", k);
+  ASSERT(mm_type != OS, "gemmini does not support OS dataflow!");
+
+  if (mm_type == CPU) {
     matmul_cpu(M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
     return false;
   }
@@ -712,24 +695,22 @@ static bool is_valid_to_continue(size_t M, size_t N, size_t K,
 //============================================================================
 // Entry Point
 //============================================================================
-static void 
-tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
-                  const elem_t A[dim_I][dim_K], 
-                  const elem_t B[dim_K][dim_J],
-                  const acc_t * D, elem_t C[dim_I][dim_J],
-                  int act, size_t shift, 
-                  size_t relu6_shift, bool repeating_bias,
-                  enum tiled_matmul_type_t tiled_matmul_type) {
-  DBG("tiled_matmul_auto started M,N,K=(%d,%d,%d)\n", dim_I, dim_J, dim_K);
+static void tiled_matmul_auto_raw(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias,
+  enum tiled_matmul_type_t mm_type) 
+{
+  DEBUG("tiled_matmul_auto started M,N,K=(%d,%d,%d)", M, N, K);
 
   // sanitize inputs before starting
-  if(is_valid_to_continue(dim_I, dim_J, dim_K, A, B, D, C, act, shift, 
-                          relu6_shift, repeating_bias, tiled_matmul_type)) {
+  if(is_valid_to_continue(M, N, K, A, B, D, C, act, shift, 
+                          relu6_shift, repeating_bias, mm_type)) {
     // create the state object
-    gemmini_t *self = create_gemmini(dim_I, dim_J, dim_K, A, B, D, C, 
+    gemmini_t *self = create_gemmini(M, N, K, A, B, D, C, 
                                      act, shift, relu6_shift, repeating_bias);
     // actually do the tiled matmul
-    pin_matrices(dim_I, dim_J, dim_K, A, B, D, C, repeating_bias);
+    pin_matrices(M, N, K, A, B, D, C, repeating_bias);
     reset_output_group(self);
     do {
       reset_A_tile_subcol(self);

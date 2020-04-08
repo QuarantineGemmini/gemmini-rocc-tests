@@ -12,16 +12,16 @@
 #include <limits.h>
 #include <stdbool.h>
 
+#include "include/util.h"
+
 //============================================================================
 // Tiling functions
 //============================================================================
-static void sp_tiled_matmul_ws(const elem_t * A, const elem_t * B,
-        const acc_t * D, elem_t * C,
-        size_t I, size_t J, size_t K, 
-        size_t pad_I, size_t pad_J, size_t pad_K,
-        size_t A_row_len, size_t B_row_len, 
-        size_t D_row_len, size_t C_row_len,
-        bool no_bias, bool repeating_bias) 
+static void sp_tiled_matmul_ws(
+  const elem_t * A, const elem_t * B, const acc_t * D, elem_t * C,
+  size_t I, size_t J, size_t K, size_t pad_I, size_t pad_J, size_t pad_K,
+  size_t A_row_len, size_t B_row_len, size_t D_row_len, size_t C_row_len,
+  bool no_bias, bool repeating_bias) 
 {
   const uint32_t A_sp_addr_start = 0;
   const uint32_t B_sp_addr_start = I * K * DIM;
@@ -140,20 +140,20 @@ static void sp_tiled_matmul_ws(const elem_t * A, const elem_t * B,
   }
 }
 
-static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
-  const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
-  const acc_t * D, elem_t C[dim_I][dim_J],
+static void tiled_matmul_outer(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
   size_t tile_I, size_t tile_J, size_t tile_K,
   int act, int shift, size_t relu6_shift, bool repeating_bias) 
 {
   // quantized
-  const size_t dim_I_pad = round_up(dim_I, DIM);
-  const size_t dim_J_pad = round_up(dim_J, DIM);
-  const size_t dim_K_pad = round_up(dim_K, DIM);
+  const size_t M_pad = round_up(M, DIM);
+  const size_t N_pad = round_up(N, DIM);
+  const size_t K_pad = round_up(K, DIM);
 
-  const size_t tiles_I_pad = dim_I_pad / DIM;
-  const size_t tiles_J_pad = dim_J_pad / DIM;
-  const size_t tiles_K_pad = dim_K_pad / DIM;
+  const size_t tiles_I_pad = M_pad / DIM;
+  const size_t tiles_J_pad = N_pad / DIM;
+  const size_t tiles_K_pad = K_pad / DIM;
 
   // how many iterations for each direction
   const size_t I0 = div_round_up(tiles_I_pad, tile_I);
@@ -166,9 +166,9 @@ static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
   const size_t last_K = default_if_zero(tiles_K_pad % tile_K, tile_K);
 
   // how much padding the hardware is supposed to add for the final tile
-  const size_t pad_I = dim_I_pad - dim_I;
-  const size_t pad_J = dim_J_pad - dim_J;
-  const size_t pad_K = dim_K_pad - dim_K;
+  const size_t pad_I = M_pad - M;
+  const size_t pad_J = N_pad - N;
+  const size_t pad_K = K_pad - K;
 
   const bool no_bias = (D == NULL);
 
@@ -177,7 +177,7 @@ static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
   }
 
   gemmini_config_ex(WS, act, 0, shift, relu6_shift);
-  gemmini_config_st(dim_J * sizeof(elem_t));
+  gemmini_config_st(N * sizeof(elem_t));
 
   for (size_t i0 = 0; i0 < I0; i0++) {
     for (size_t j0 = 0; j0 < J0; j0++) {
@@ -186,9 +186,10 @@ static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
         const acc_t * pre = NULL;
         if (k0 == 0) {
           size_t bias_row = repeating_bias ? 0 : i0*tile_I*DIM;
-          pre = &((acc_t (*)[dim_J])D)[bias_row][j0*tile_J*DIM];
+          pre = &D[bias_row*N + j0*tile_J*DIM];
         }
-        elem_t * out = (k0 == K0-1) ? &C[i0*tile_I*DIM][j0*tile_J*DIM] : NULL;
+        elem_t * out = (k0 == K0-1) ? &C[i0*tile_I*DIM*N + j0*tile_J*DIM] 
+                                    : NULL;
 
         const size_t I     = (i0 < I0-1) ? tile_I : last_I;
         const size_t J     = (j0 < J0-1) ? tile_J : last_J;
@@ -198,13 +199,11 @@ static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
         const size_t pad_J = (j0 < J0-1) ? 0      : pad_J;
         const size_t pad_K = (k0 < K0-1) ? 0      : pad_K;
 
-        sp_tiled_matmul_ws(&A[i0*tile_I*DIM][k0*tile_K*DIM],
-            &B[k0*tile_K*DIM][j0*tile_J*DIM],
-            pre, out,
-            I, J, K,
-            pad_I, pad_J, pad_K,
-            dim_K, dim_J, dim_J, dim_J,
-            no_bias, repeating_bias);
+        sp_tiled_matmul_ws(
+          &A[i0*tile_I*DIM*K + k0*tile_K*DIM],
+          &B[k0*tile_K*DIM*N + j0*tile_J*DIM], pre, out,
+          I, J, K, pad_I, pad_J, pad_K,
+          K, N, N, N, no_bias, repeating_bias);
       }
     }
   }
@@ -213,91 +212,65 @@ static void tiled_matmul_outer(size_t dim_I, size_t dim_J, size_t dim_K,
 
 // This function runs a tiled matrix multiplication, with hardcoded tiling
 // factors
-void tiled_matmul(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
-        const acc_t * D, elem_t C[dim_I][dim_J],
-        int act, size_t shift, size_t relu6_shift, bool repeating_bias,
-        size_t tile_I, size_t tile_J, size_t tile_K,
-        enum tiled_matmul_type_t tiled_matmul_type) {
-
+static void tiled_matmul(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias,
+  size_t tile_I, size_t tile_J, size_t tile_K,
+  enum tiled_matmul_type_t mm_type) 
+{
 #ifdef GEMMINI_ASSERTIONS
   // Make sure that the tiling factors make sense
-  if (tile_I <= 0) {
-    printf("tile_I is non-positive\n");
-    exit(1);
-  } else if (tile_J <= 0) {
-    printf("tile_J is non-positive\n");
-    exit(1);
-  } else if (tile_K <= 0) {
-    printf("tile_K is non-positive\n");
-    exit(1);
-  }
+  ASSERT(tile_I > 0, "tile_I is non-positive");
+  ASSERT(tile_J > 0, "tile_J is non-positive");
+  ASSERT(tile_K > 0, "tile_K is non-positive");
 
-  const size_t dim_I_padded = (dim_I + DIM - 1) / DIM;
-  const size_t dim_J_padded = (dim_J + DIM - 1) / DIM;
-  const size_t dim_K_padded = (dim_K + DIM - 1) / DIM;
+  const size_t M_padded = (M + DIM - 1) / DIM;
+  const size_t N_padded = (N + DIM - 1) / DIM;
+  const size_t K_padded = (K + DIM - 1) / DIM;
 
-  if (tile_I * DIM - dim_I > dim_I_padded) {
-    printf("tile_I is too large (tile_I * DIM > dim_I_padded)\n");
-    exit(1);
-  } else if (tile_J * DIM > dim_J_padded) {
-    printf("tile_J is too large (tile_J * DIM > dim_J_padded)\n");
-    exit(1);
-  } else if (tile_K * DIM > dim_K_padded) {
-    printf("tile_K is too large (tile_K * DIM > dim_K_padded)\n");
-    exit(1);
-  }
+  ASSERT(tile_I * DIM - M <= M_padded, "tile_I is too large");
+  ASSERT(tile_J * DIM <= N_padded,     "tile_J is too large");
+  ASSERT(tile_K * DIM <= K_padded,     "tile_K is too large");
 
   const size_t total_spad_rows =
       (tile_I * tile_K * DIM) +   // Rows to store A
       (tile_K * tile_J * DIM);    // Rows to store B
-
-  if (total_spad_rows > BANK_NUM * BANK_ROWS) {
-    printf("Not enough space in scratchpad to store A and B matrices\n");
-    exit(1);
-  }
-
   const size_t total_acc_rows =
       tile_I * tile_J * DIM;      // Rows to store C
 
-  if (total_acc_rows > ACC_ROWS) {
-    printf("Not enough space in accumulator to store C\n");
-    exit(1);
-  }
+  ASSERT(total_spad_rows <= BANK_NUM * BANK_ROWS,
+    "Not enough space in scratchpad to store A and B matrices");
+  ASSERT(total_acc_rows <= ACC_ROWS,
+    "Not enough space in accumulator to store C");
 
-  if (tile_I > 65535 || tile_J > 65535 || tile_K > 65535) {
-    printf("I, J, and K tiling factors must be less than 65535, ");
-    printf("to fit within the bounds of the LOOP_WS function\n");
-    exit(1);
-  }
+  ASSERT(tile_I <= 65535, "I tiling factor must be less than 65535, ");
+  ASSERT(tile_J <= 65535, "J tiling factor must be less than 65535, ");
+  ASSERT(tile_K <= 65535, "K tiling factor must be less than 65535, ");
 #endif
 
   // Run a tiled matrix multiplication on either Gemmini or the CPU
-  if (tiled_matmul_type == OS) {
-    printf("gemmini does not support output-stationary dataflow!\n");
-    exit(1);
+  ASSERT(mm_type != OS, "gemmini does not support OS dataflow!");
+
+  if(mm_type == WS) {
+    tiled_matmul_outer(
+      M, N, K, A, B, D, C,
+      tile_I, tile_J, tile_K, act, shift, relu6_shift, repeating_bias);
   } 
-  else if(tiled_matmul_type == WS) {
-      tiled_matmul_outer(dim_I, dim_J, dim_K,
-              A, B, D, C,
-              tile_I, tile_J, tile_K,
-              act, shift, relu6_shift, repeating_bias);
-  } 
-  else /*if (tiled_matmul_type == CPU)*/ {
-      matmul_cpu(dim_I, dim_J, dim_K,
-              A, B, D, C,
-              act, shift, relu6_shift, repeating_bias);
+  else {
+    matmul_cpu_raw(
+      M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
   }
 }
 
 //============================================================================
 // Entry Point
 //============================================================================
-void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
-        const acc_t * D, elem_t C[dim_I][dim_J],
-        int act, size_t shift, size_t relu6_shift, bool repeating_bias,
-        enum tiled_matmul_type_t tiled_matmul_type)
+static void tiled_matmul_auto_raw(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias,
+  enum tiled_matmul_type_t mm_type) 
 {
   // [ssteffl] NOTE: this requires the output-group to be square. inefficient
   // for tall/skinny or wide/short output matrices.
@@ -308,19 +281,18 @@ void tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
   const size_t max_tile_k        = mats_in_partition / max_tile_i_j;
 
   // how many DIMxDIM tiles in each direction
-  const size_t tile_I_pad = div_round_up(dim_I, DIM);
-  const size_t tile_J_pad = div_round_up(dim_J, DIM);
-  const size_t tile_K_pad = div_round_up(dim_K, DIM);
+  const size_t tile_I_pad = div_round_up(M, DIM);
+  const size_t tile_J_pad = div_round_up(N, DIM);
+  const size_t tile_K_pad = div_round_up(K, DIM);
 
   // how many tiles per matmul block (acc-output=IxJ, sp is 2-way split=Kx1)
   const size_t tile_I = min(tile_I_pad, max_tile_i_j);
   const size_t tile_J = min(tile_J_pad, max_tile_i_j);
   const size_t tile_K = min(tile_K_pad, max_tile_k);
 
-  tiled_matmul(dim_I, dim_J, dim_K,
-      A, B, D, C, act, shift, relu6_shift, repeating_bias,
-      tile_I, tile_J, tile_K,
-      tiled_matmul_type);
+  tiled_matmul(
+    M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias,
+    tile_I, tile_J, tile_K, mm_type);
 }
 
 
