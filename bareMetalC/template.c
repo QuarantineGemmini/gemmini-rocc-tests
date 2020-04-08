@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "include/gemmini.h"
+#include "include/gemmini_nn.h"
+
 
 //============================================================================
 void gemmini1_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM], 
@@ -37,17 +39,10 @@ void gemmini1_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM],
 void gemmini2_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM], 
                    elem_t Identity[DIM][DIM], elem_t Out[DIM][DIM]) 
 {
-  printf("Configure Gemmini2 ISA\n");
-  gemmini_config_addr_ab(In, Identity);
-  gemmini_config_addr_cd(Out, D);
-  gemmini_config_size0(DIM, DIM);
-  gemmini_config_size1(DIM);
-  gemmini_config_repeating_bias(false);
-  gemmini_config_ex(WEIGHT_STATIONARY, 0, 0, 0, 0);
-
+  printf("Configured Gemmini2 ISA\n");
   printf("Multiply \"In\" matrix with \"Identity\" matrix with a bias of 0\n");
-  gemmini_compute();
 
+  tiled_matmul_nn_auto(DIM, DIM, DIM, In, Identity, D, Out, 0, 0, 0, WEIGHT_STATIONARY, false, "not_a_layer");
 }
 
 //============================================================================

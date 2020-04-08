@@ -1,4 +1,4 @@
 tests = \
  	mobilenet \
-	#resnet50
+	resnet50
 
