@@ -54,7 +54,7 @@ void gemmini2_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM],
 int main() {
   pin_all();
   printf("Flush Gemmini TLB of stale virtual addresses\n");
-  gemmini_flush(0);
+  //gemmini_flush(0);
 
   printf("Initialize our input and output matrices in main memory\n");
   elem_t In[DIM][DIM];
