@@ -260,11 +260,11 @@ init_gemmini_state(size_t M, size_t N, size_t K,
 //============================================================================
 // create and destroy gemmini: hides implementation details.
 //============================================================================
-static gemmini_t* 
-create_gemmini(size_t M, size_t N, size_t K,
-               const elem_t A[M][K], const elem_t B[K][N],
-               const acc_t * D, elem_t C[M][N],
-               int act, int shift, int relu6_shift, bool repeating_bias) {
+static gemmini_t* create_gemmini(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  int act, int shift, int relu6_shift, bool repeating_bias) 
+{
   // initialize state
   gemmini_t * self = init_gemmini_state(M, N, K,
                                         (mem_addr_t) A, (mem_addr_t) B,
@@ -682,11 +682,12 @@ static bool is_valid_to_continue(
   // basic sanity checks
   ASSERT(M > 0, "invalid M: %d", M);
   ASSERT(N > 0, "invalid N: %d", N);
-  ASSERT(K > 0, "invalid K: %d", k);
+  ASSERT(K > 0, "invalid K: %d", K);
   ASSERT(mm_type != OS, "gemmini does not support OS dataflow!");
 
   if (mm_type == CPU) {
-    matmul_cpu(M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
+    matmul_cpu_raw(
+      M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
     return false;
   }
   return true;

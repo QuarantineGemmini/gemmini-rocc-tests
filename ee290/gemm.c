@@ -64,11 +64,11 @@ int main (int argc, char * argv[]) {
   // parse args
   //-------------
   time_parse = read_cycles();
-  if(argc == 0) print_usage();
+  if(argc == 1) print_usage();
   if(argc < 4) ERROR("missing <M>, <N> or <K>. see usage with -h");
 
   size_t tmp;
-  for(int i=0; i<argc; i=i+1) {
+  for(int i=1; i<argc; i+=1) {
     if(!strcmp(argv[i], "-h"))                print_usage();
     else if(!strcmp(argv[i], "-help"))        print_usage();
     else if(!strcmp(argv[i], "-verify"))      verify = true;
@@ -77,7 +77,7 @@ int main (int argc, char * argv[]) {
     else if(!strcmp(argv[i], "-zeros"))       zeros = true;
     else if(!strcmp(argv[i], "-diag"))        diag = true;
     else if(!strcmp(argv[i], "-dump"))        dump = true;
-    else if(!sscanf(argv[i], "%u", &tmp)) {
+    else if(sscanf(argv[i], "%u", &tmp)) {
       if(tmp == 0) ERROR("cannot specify zero as an <M,N,K> dimension");
       else if(m == 0) m = tmp;
       else if(n == 0) n = tmp;
@@ -163,17 +163,19 @@ int main (int argc, char * argv[]) {
   //---------------------
   time_all = time_parse + time_init + time_pin + time_gemmini + 
              time_cpu + time_verify;
-  PRINT("-----------------------------");
-  PRINT(" STATUS: %s", (success ? "PASS" : "FAIL"));
-  PRINT("-----------------------------");
-  PRINT("        %%,      (cycles)");
-  PRINT("total  :%10d, %u", time_all,    INT_PCT(time_all,    time_all));
-  PRINT("parse  :%10d, %u", time_parse,  INT_PCT(time_parse,  time_all));
-  PRINT("init   :%10d, %u", time_init,   INT_PCT(time_init,   time_all));
-  PRINT("pin    :%10d, %u", time_pin,    INT_PCT(time_pin,    time_all));
-  PRINT("gemmini:%10d, %u", time_gemmini,INT_PCT(time_gemmini,time_all));
-  PRINT("cpu    :%10d, %u", time_cpu,    INT_PCT(time_cpu,    time_all));
-  PRINT("verify :%10d, %u", time_verify, INT_PCT(time_verify, time_all));
+  PRINT("--------------------------------");
+  PRINT("section          cycles        %%");
+  PRINT("--------------------------------");
+  PRINT("total:  %15llu   %6.2f", time_all,    PCT(time_all,    time_all));
+  PRINT("parse:  %15llu   %6.2f", time_parse,  PCT(time_parse,  time_all));
+  PRINT("init:   %15llu   %6.2f", time_init,   PCT(time_init,   time_all));
+  PRINT("pin:    %15llu   %6.2f", time_pin,    PCT(time_pin,    time_all));
+  PRINT("gemmini:%15llu   %6.2f", time_gemmini,PCT(time_gemmini,time_all));
+  PRINT("cpu:    %15llu   %6.2f", time_cpu,    PCT(time_cpu,    time_all));
+  PRINT("verify: %15llu   %6.2f", time_verify, PCT(time_verify, time_all));
+  PRINT("--------------------------------");
+  PRINT("STATUS: %s", (success ? "PASS" : "FAIL"));
+  PRINT("--------------------------------");
 
   exit(success ? 0 : 1);
 }

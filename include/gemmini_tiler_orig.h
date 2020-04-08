@@ -185,24 +185,25 @@ static void tiled_matmul_outer(
 
         const acc_t * pre = NULL;
         if (k0 == 0) {
-          size_t bias_row = repeating_bias ? 0 : i0*tile_I*DIM;
-          pre = &D[bias_row*N + j0*tile_J*DIM];
+          size_t bias_row = repeating_bias ? 0 : i0*tile_I*DIM*N;
+          pre = &D[bias_row + j0*tile_J*DIM];
         }
         elem_t * out = (k0 == K0-1) ? &C[i0*tile_I*DIM*N + j0*tile_J*DIM] 
                                     : NULL;
 
-        const size_t I     = (i0 < I0-1) ? tile_I : last_I;
-        const size_t J     = (j0 < J0-1) ? tile_J : last_J;
-        const size_t K     = (k0 < K0-1) ? tile_K : last_K;
+        const size_t ws_I  = (i0 < I0-1) ? tile_I : last_I;
+        const size_t ws_J  = (j0 < J0-1) ? tile_J : last_J;
+        const size_t ws_K  = (k0 < K0-1) ? tile_K : last_K;
 
-        const size_t pad_I = (i0 < I0-1) ? 0      : pad_I;
-        const size_t pad_J = (j0 < J0-1) ? 0      : pad_J;
-        const size_t pad_K = (k0 < K0-1) ? 0      : pad_K;
+        const size_t ws_pad_I = (i0 < I0-1) ? 0      : pad_I;
+        const size_t ws_pad_J = (j0 < J0-1) ? 0      : pad_J;
+        const size_t ws_pad_K = (k0 < K0-1) ? 0      : pad_K;
+
 
         sp_tiled_matmul_ws(
           &A[i0*tile_I*DIM*K + k0*tile_K*DIM],
-          &B[k0*tile_K*DIM*N + j0*tile_J*DIM], pre, out,
-          I, J, K, pad_I, pad_J, pad_K,
+          &B[k0*tile_K*DIM*N + j0*tile_J*DIM], pre, out, 
+          ws_I, ws_J, ws_K, ws_pad_I, ws_pad_J, ws_pad_K,
           K, N, N, N, no_bias, repeating_bias);
       }
     }

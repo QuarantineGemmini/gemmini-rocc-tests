@@ -22,10 +22,6 @@
     printf("\n");                  \
   } while(0)
 
-#ifndef NODEBUG
-#define DEBUG(fmt, ...)            \
-  PRINT(fmt, ##__VA_ARGS__)
-
 #define ERROR(fmt, ...)            \
   do {                             \
     PRINT(fmt, ##__VA_ARGS__);     \
@@ -39,10 +35,11 @@
     }                              \
   } while(0)
 
+#ifndef NODEBUG
+#define DEBUG(fmt, ...)            \
+  PRINT(fmt, ##__VA_ARGS__)
 #else 
 #define DEBUG(fmt, ...) 
-#define ERROR(fmt, ...)
-#define ASSERT(predicate, fmt, ...)
 #endif // NODEBUG
 
 #endif // __UTIL_H__

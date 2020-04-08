@@ -25,7 +25,8 @@ static bool is_valid_to_continue(
   ASSERT(mm_type != OS, "gemmini does not support OS dataflow!");
 
   if (mm_type == CPU) {
-    matmul_cpu(M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
+    matmul_cpu_raw(
+      M, N, K, A, B, D, C, act, shift, relu6_shift, repeating_bias);
     return false;
   }
   return true;

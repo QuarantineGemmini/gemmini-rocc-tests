@@ -71,9 +71,10 @@ static inline void __pin_vector(const char*vec, size_t len) {
   if(i-1*PAGESIZE < len) item[2] = vec[i-1*PAGESIZE];
                          item[3] = vec[len-1];
 }
-static inline void pin_matrices(size_t M, size_t N, size_t K,
-        const elem_t A[M][K], const elem_t B[K][N],
-        const acc_t * D, elem_t C[M][N], bool repeating_bias) 
+static inline void pin_matrices(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  bool repeating_bias) 
 {
   // this is really inefficient, but we don't have mlockall() in newlib, so the
   // best we can do is just touch every page before the accelerator uses it
@@ -242,7 +243,7 @@ int rand() {
   return x >> 24;
 }
 
-# define INT_PCT(n, d) (100.0*(double)n/(double)d)
+# define PCT(n, d) ((100.0*(double)n/(double)d))
 uint64_t read_cycles() {
     uint64_t cycles;
     asm volatile ("rdcycle %0" : "=r" (cycles));

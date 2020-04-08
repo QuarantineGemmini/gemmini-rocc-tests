@@ -14,7 +14,6 @@
 #define DIM_K 64
 #define DIM_J 64
 
-
 void print_tile(elem_t* in, int tile_dim) {
   for (size_t r = 0; r < tile_dim; r++) {
     printf("row starts at: %p\n", in +r*DIM_J);

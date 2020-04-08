@@ -75,7 +75,8 @@ int main() {
 
   elem_t Out[DIM][DIM];
 
-  pin_matrices(DIM, DIM, DIM, In, Identity, (const acc_t*)D, Out, false);
+  pin_matrices(DIM, DIM, DIM, (elem_t*)In, (elem_t*)Identity, 
+        (const acc_t*)D, (elem_t*)Out, false);
 #ifdef USE_HW_TILER
   gemmini2_body(In, D, Identity, Out);
 #else

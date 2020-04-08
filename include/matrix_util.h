@@ -35,7 +35,7 @@ static elem_t * create_diag_matrix_i(size_t r, size_t c) {
   elem_t *m = create_zero_matrix_i(r,c);
   const size_t min_dim = (r<c) ? r : c;
   for(size_t i=0; i<min_dim; i++) {
-    m[i*c+i] = (elem_t)rand() & 0xf;
+    m[i*c+i] = ((elem_t)rand() & 0xf) - 8;
   }
   return m;
 }
@@ -45,7 +45,7 @@ static elem_t * create_rand_matrix_i(size_t r, size_t c) {
   elem_t *m = (elem_t*) malloc(bytes);
   for(size_t i=0; i<r; i++) {
     for(size_t j=0; j<c; j++) {
-      m[i*c+j] = (elem_t)rand() & 0xf;
+      m[i*c+j] = ((elem_t)rand() & 0xf) - 8;
     }
   }
   return m;
@@ -65,7 +65,7 @@ static acc_t * create_diag_matrix_o(size_t r, size_t c) {
   acc_t *m = create_zero_matrix_o(r,c);
   const size_t min_dim = (r<c) ? r : c;
   for(size_t i=0; i<min_dim; i++) {
-    m[i*c+i] = (acc_t)rand() & 0xf;
+    m[i*c+i] = ((acc_t)rand() & 0xf) - 8;
   }
   return m;
 }
@@ -75,7 +75,7 @@ static acc_t * create_rand_matrix_o(size_t r, size_t c) {
   acc_t *m = (acc_t*) malloc(bytes);
   for(size_t i=0; i<r; i++) {
     for(size_t j=0; j<c; j++) {
-      m[i*c+j] = (acc_t)rand() & 0xf;
+      m[i*c+j] = ((acc_t)rand() & 0xf) - 8;
     }
   }
   return m;
@@ -89,7 +89,7 @@ static void dump_matrix_i(const char *name,const elem_t *m,size_t r,size_t c){
   for(size_t i=0; i<r; i++) {
     printf("\n");
     for(size_t j=0; j<c; j++) {
-      printf("  %d", m[i*c+j]);
+      printf("  %4d,", m[i*c+j]);
     }
   }
   printf("\n]\n");
@@ -100,7 +100,7 @@ static void dump_matrix_o(const char *name,const acc_t *m,size_t r,size_t c){
   for(size_t i=0; i<r; i++) {
     printf("\n");
     for(size_t j=0; j<c; j++) {
-      printf("  %d", m[i*c+j]);
+      printf("  %4d,", m[i*c+j]);
     }
   }
   printf("\n]\n");
