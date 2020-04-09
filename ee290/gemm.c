@@ -136,6 +136,7 @@ int main (int argc, char * argv[]) {
   //---------------------
   time_gemmini = read_cycles();
   gemm_auto(m, n, k, A, B, D, C_gemmini, repeat_d, WS);
+  time_gemmini = read_cycles() - time_gemmini;
   DEBUG("gemmini time: %.6d (s)", time_gemmini);
   if(dump) dump_matrix_i("C_gemmini", C_gemmini, m, n);
 
