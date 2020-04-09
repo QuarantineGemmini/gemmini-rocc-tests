@@ -43,54 +43,13 @@ void print_usage() {
 }
 
 //==========================================================================
-// usage message
+// run an interation
 //==========================================================================
-int main (int argc, char * argv[]) {
-  size_t m      = 0;
-  size_t n      = 0;
-  size_t k      = 0;
-  bool verify   = false;
-  bool no_d     = false;
-  bool repeat_d = false;
-  bool zeros    = false;
-  bool diag     = false;
-  bool dump     = false;
-
-  size_t time_parse, time_init, time_pin, time_gemmini, time_cpu,
-         time_verify, time_all;
-  bool success  = false;
-  
-  //-------------
-  // parse args
-  //-------------
-  time_parse = read_cycles();
-  if(argc == 1) print_usage();
-  if(argc < 4) ERROR("missing <M>, <N> or <K>. see usage with -h");
-
-  size_t tmp;
-  for(int i=1; i<argc; i+=1) {
-    if(!strcmp(argv[i], "-h"))                print_usage();
-    else if(!strcmp(argv[i], "-help"))        print_usage();
-    else if(!strcmp(argv[i], "-verify"))      verify = true;
-    else if(!strcmp(argv[i], "-no_d"))        no_d = true;
-    else if(!strcmp(argv[i], "-repeat_d"))    repeat_d = true;
-    else if(!strcmp(argv[i], "-zeros"))       zeros = true;
-    else if(!strcmp(argv[i], "-diag"))        diag = true;
-    else if(!strcmp(argv[i], "-dump"))        dump = true;
-    else if(sscanf(argv[i], "%u", &tmp)) {
-      if(tmp == 0) ERROR("cannot specify zero as an <M,N,K> dimension");
-      else if(m == 0) m = tmp;
-      else if(n == 0) n = tmp;
-      else if(k == 0) k = tmp;
-      else ERROR("too many arguments. try -h");
-    }
-    else ERROR("unrecognized argument: %s", argv[i]);
-  }
-  if (m==0 || n==0 || k==0) ERROR("you must specify all 3 <M,N,K> params!");
-
-  time_parse = read_cycles() - time_parse;
-  DEBUG("parse time: %.6d (s)", time_parse);
-
+bool run(size_t m, size_t n, size_t k, bool verify,
+  bool no_d, bool repeat_d, bool zeros, bool diag, bool dump) 
+{
+  bool success  = !verify;
+  size_t time_init, time_pin, time_gemmini, time_cpu, time_verify, time_all;
   //---------------------
   // initialize matrices
   //---------------------
@@ -162,13 +121,13 @@ int main (int argc, char * argv[]) {
   //---------------------
   // print summary
   //---------------------
-  time_all = time_parse + time_init + time_pin + time_gemmini + 
-             time_cpu + time_verify;
+  time_all = time_init + time_pin + time_gemmini + time_cpu + time_verify;
+  PRINT("--------------------------------");
+  PRINT("SUMMARY FOR MNK: %u %u %u", m, n, k);
   PRINT("--------------------------------");
   PRINT("section          cycles        %%");
   PRINT("--------------------------------");
   PRINT("total:  %15llu   %6.2f", time_all,    PCT(time_all,    time_all));
-  PRINT("parse:  %15llu   %6.2f", time_parse,  PCT(time_parse,  time_all));
   PRINT("init:   %15llu   %6.2f", time_init,   PCT(time_init,   time_all));
   PRINT("pin:    %15llu   %6.2f", time_pin,    PCT(time_pin,    time_all));
   PRINT("gemmini:%15llu   %6.2f", time_gemmini,PCT(time_gemmini,time_all));
@@ -176,7 +135,75 @@ int main (int argc, char * argv[]) {
   PRINT("verify: %15llu   %6.2f", time_verify, PCT(time_verify, time_all));
   PRINT("--------------------------------");
   PRINT("STATUS: %s", (success ? "PASS" : "FAIL"));
-  PRINT("--------------------------------");
+  PRINT("--------------------------------\n");
+
+  //---------------------
+  // free memory
+  //---------------------
+  free(A);
+  free(B);
+  free(C_gemmini);
+  if(verify) free(C_gold);
+  if(!no_d) free(D);
+  
+  return success;
+}
+
+//==========================================================================
+// usage message
+//==========================================================================
+int main (int argc, char * argv[]) {
+  size_t m      = 0;
+  size_t n      = 0;
+  size_t k      = 0;
+  bool verify   = false;
+  bool no_d     = false;
+  bool repeat_d = false;
+  bool zeros    = false;
+  bool diag     = false;
+  bool dump     = false;
+
+  bool success  = false;
+  size_t total_time_parse, time_parse;
+  
+  //-------------
+  // parse args
+  //-------------
+  total_time_parse = 0;
+  time_parse = read_cycles();
+  if(argc == 1) print_usage();
+  if(argc < 4) ERROR("missing <M>, <N> or <K>. see usage with -h");
+
+  size_t tmp;
+  for(int i=1; i<argc; i+=1) {
+    if(!strcmp(argv[i], "-h"))                print_usage();
+    else if(!strcmp(argv[i], "-help"))        print_usage();
+    else if(!strcmp(argv[i], "-verify"))      verify = true;
+    else if(!strcmp(argv[i], "-no_d"))        no_d = true;
+    else if(!strcmp(argv[i], "-repeat_d"))    repeat_d = true;
+    else if(!strcmp(argv[i], "-zeros"))       zeros = true;
+    else if(!strcmp(argv[i], "-diag"))        diag = true;
+    else if(!strcmp(argv[i], "-dump"))        dump = true;
+    else if(sscanf(argv[i], "%u", &tmp)) {
+      if(tmp == 0) ERROR("cannot specify zero as an <M,N,K> dimension");
+      else if(m == 0) m = tmp;
+      else if(n == 0) n = tmp;
+      else if(k == 0) {
+        k = tmp;
+        total_time_parse += read_cycles() - time_parse;
+        success = run(m,n,k,verify,no_d,repeat_d,zeros,diag,dump) || success;
+        time_parse = read_cycles();
+        // now reset these for the next run
+        m = 0;
+        n = 0;
+        k = 0;
+      }
+      else ERROR("too many arguments. try -h");
+    }
+    else ERROR("unrecognized argument: %s", argv[i]);
+  }
+  total_time_parse += read_cycles() - time_parse;
+  DEBUG("parse time: %.6d (s)", total_time_parse);
 
   exit(success ? 0 : 1);
 }
