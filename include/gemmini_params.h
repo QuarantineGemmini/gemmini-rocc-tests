@@ -1,1 +1,1 @@
-gemmini_params_dim08sp64acc16bus064.h
+gemmini_params_dim32sp16acc64bus128.h
