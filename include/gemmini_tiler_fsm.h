@@ -9,6 +9,7 @@
 #ifndef __GEMMINI_TILER_FSM_H__
 #define __GEMMINI_TILER_FSM_H__
 
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -88,8 +89,8 @@ typedef struct gemmini {
   sp_row_t    GBL_B_SP_ROW_ADDR_1;    // sp row of 1st tmp slot for B-tiles
   sp_row_t    GBL_B_SP_ROW_ADDR_2;    // sp row of 2nd tmp slot for B-tiles
 
-  tile_t      TILE_COLS_PER_GROUP;    // num tiles wide is an output-group
-  tile_t      TILE_ROWS_PER_GROUP;    // num tiles tall is an output-group
+  tile_t      TOTAL_ACC_TILES;        // how many tiles fit in the accum
+  tile_t      SQRT_ACC_TILES;         // sqrt of above
 
   bytes_t     BYTE_ROWS_PER_TILE;     // num-rows of tile A,B,C,D
   bytes_t     I_BYTE_COLS_PER_GROUP;  // byte-width of output-group A,B,C
@@ -128,6 +129,9 @@ typedef struct gemmini {
   tile_t      TILE_COL_END;           // last x tile index in C matrix
   tile_t      TILE_ROW_END;           // last y tile index in C matrix
   tile_t      K_TILE_COL_END;         // last x tile index in A matrix
+
+  tile_t      TILE_COLS_PER_GROUP;    // num tiles wide is an output-group
+  tile_t      TILE_ROWS_PER_GROUP;    // num tiles tall is an output-group
 
   //-------------------------------------
   // global state persistent across all loops
@@ -206,18 +210,21 @@ init_gemmini_state(size_t M, size_t N, size_t K,
   self->GBL_B_SP_ROW_ADDR_1   = (BANK_NUM * BANK_ROWS) - 2*DIM;
   self->GBL_B_SP_ROW_ADDR_2   = (BANK_NUM * BANK_ROWS) - 1*DIM;
 
-  self->TILE_ROWS_PER_GROUP   = (BANK_NUM * BANK_ROWS / DIM) - 2;
-  self->TILE_COLS_PER_GROUP   = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
-  if(self->TILE_COLS_PER_GROUP == 0) {
-    // NOTE: this happens if accumulator size < scratchpad size. Don't do 
-    //       this! your accumulator should be much larger than scratchpad!
-    self->TILE_ROWS_PER_GROUP = 4;
-    self->TILE_COLS_PER_GROUP = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
-  }
+  //self->TILE_ROWS_PER_GROUP   = (BANK_NUM * BANK_ROWS / DIM) - 2;
+  //self->TILE_COLS_PER_GROUP   = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
+  //if(self->TILE_COLS_PER_GROUP == 0) {
+  //  // NOTE: this happens if accumulator size < scratchpad size. Don't do 
+  //  //       this! your accumulator should be much larger than scratchpad!
+  //  self->TILE_ROWS_PER_GROUP = 4;
+  //  self->TILE_COLS_PER_GROUP = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
+  //}
 
   self->BYTE_ROWS_PER_TILE    = DIM;
-  self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * I_TILE_BYTE_WIDTH;
-  self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * O_TILE_BYTE_WIDTH;
+
+  self->TOTAL_ACC_TILES = (ACC_ROWS / DIM);
+  self->SQRT_ACC_TILES  = sqrt(self->TOTAL_ACC_TILES);
+  //self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * I_TILE_BYTE_WIDTH;
+  //self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * O_TILE_BYTE_WIDTH;
   self->I_TILE_BYTE_WIDTH     = I_TILE_BYTE_WIDTH;
   self->O_TILE_BYTE_WIDTH     = O_TILE_BYTE_WIDTH;
 
@@ -253,6 +260,50 @@ init_gemmini_state(size_t M, size_t N, size_t K,
   self->TILE_ROW_END          = ((M + DIM - 1) / DIM) - 1;
   self->TILE_COL_END          = ((N + DIM - 1) / DIM) - 1;
   self->K_TILE_COL_END        = ((K + DIM - 1) / DIM) - 1;
+
+  //------------------------------------------------------------------------
+  // dynamically set output-group dimension based on M,N,K sizes
+  //------------------------------------------------------------------------
+  bool has_dim_fit = false;
+  size_t best_h;
+  size_t best_dist = 0;
+
+  for(size_t h=1; h<=self->TOTAL_ACC_TILES; h+=1) {
+    size_t w = self->TOTAL_ACC_TILES/h;
+    size_t dist = pow(h - self->SQRT_ACC_TILES, 2);
+    if((h < w) && (self->TILE_ROW_END < h)) {
+      if(!has_dim_fit) {
+        has_dim_fit = true;
+        best_h = h;
+        best_dist = dist;
+      } 
+      else if (h < best_h) {
+        best_h = h;
+        best_dist = dist;
+      }
+    }
+    else if((h > w) && (self->TILE_COL_END < w)) {
+      if(!has_dim_fit) {
+        has_dim_fit = true;
+        best_h = h;
+        best_dist = dist;
+      } 
+      else if (h > best_h) {
+        best_h = h;
+        best_dist = dist;
+      }
+    }
+    else if(!has_dim_fit && (dist < best_dist)) {
+      best_h = h;
+      best_dist = dist;
+    }
+  }
+  self->TILE_ROWS_PER_GROUP   = best_h;
+  self->TILE_COLS_PER_GROUP   = self->TOTAL_ACC_TILES / best_h;
+  self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * I_TILE_BYTE_WIDTH;
+  self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * O_TILE_BYTE_WIDTH;
+  printf("og-size=(%d,%d)\n", 
+      self->TILE_ROWS_PER_GROUP, self->TILE_COLS_PER_GROUP);
 
   return self;
 }
