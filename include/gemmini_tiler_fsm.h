@@ -44,33 +44,33 @@
       B_mem_stride, B_mem_addr, B_sp_row_addr, B_item_rows, B_item_cols)
 
 #define DBG_MVIN_A                                                      \
-  DEBUG("        mvin(A,stride=%u,mem=%x,sp=%u,rows=%u,cols=%u)",       \
+  DEBUG("        mvin(A,stride=%x,mem=%x,sp=%x,rows=%u,cols=%u)",       \
       A_mem_stride, A_mem_addr, A_sp_row_addr, A_item_rows, A_item_cols)
 
 #define DBG_MVIN_D                                                      \
-  DEBUG("        mvin(D,stride=%u,mem=%x,acc=%u,%u,rows=%u,cols=%u)",   \
+  DEBUG("        mvin(D,stride=%x,mem=%x,acc=%x,%x,rows=%u,cols=%u)",   \
       D_mem_stride, D_mem_addr,                                         \
       (D_acc_row_addr >> 30) & 0x3, D_acc_row_addr & 0x3fffffff,        \
       D_item_rows, D_item_cols)
 
 #define DBG_PRELOAD_B                                                   \
-  DEBUG("        preload(B=%u,C=%u,%u,B(r,c)=(%u,%u),C(r,c)=(%u,%u))",  \
+  DEBUG("        preload(B=%x,C=%x,%x,B(r,c)=(%u,%u),C(r,c)=(%u,%u))",  \
       B_sp_row_addr,                                                    \
       (C_acc_row_addr >> 30) & 0x3, C_acc_row_addr & 0x3fffffff,        \
       B_item_rows, B_item_cols, C_item_rows, C_item_cols)
 
 #define DBG_COMPUTE_PRE                                                 \
-  DEBUG("        compute.pre(A=%u,D=%u,A(r,c)=(%u,%u),D(r,c)=(%u,%u))", \
+  DEBUG("        compute.pre(A=%x,D=%x,A(r,c)=(%u,%u),D(r,c)=(%u,%u))", \
       A_sp_row_addr, D_sp_row_addr,                                     \
       A_item_rows, A_item_cols, D_item_rows, D_item_cols)
 
 #define DBG_COMPUTE_ACC                                                 \
-  DEBUG("        compute.acc(A=%u,D=%u,A(r,c)=(%u,%u),D(r,c)=(%u,%u))", \
+  DEBUG("        compute.acc(A=%x,D=%x,A(r,c)=(%u,%u),D(r,c)=(%u,%u))", \
       A_sp_row_addr, D_sp_row_addr,                                     \
       A_item_rows, A_item_cols, D_item_rows, D_item_cols)
 
 #define DBG_MVOUT_C                                                     \
-  DEBUG("        mvout(C,stride=%u,mem=%x,acc=%u,%u,rows=%u,cols=%u)",  \
+  DEBUG("        mvout(C,stride=%x,mem=%x,acc=%x,%x,rows=%u,cols=%u)",  \
       C_mem_stride, C_mem_addr,                                         \
       (C_acc_row_addr >> 30) & 0x3, C_acc_row_addr & 0x3fffffff,        \
       C_item_rows, C_item_cols)
@@ -83,21 +83,26 @@ typedef size_t    tile_t;
 typedef size_t    sp_row_t;
 typedef uintptr_t mem_addr_t;
 
+//---------------------------------------------------------------------------
+// hardware specific constants
+//---------------------------------------------------------------------------
+// sp row of 1st/2nd tmp slot for B-tiles
+static const sp_row_t  GBL_B_SP_ROW_ADDR_1 = (BANK_NUM * BANK_ROWS) - 2*DIM;
+static const sp_row_t  GBL_B_SP_ROW_ADDR_2 = (BANK_NUM * BANK_ROWS) - 1*DIM;
+
+// how many tiles fit in the accum and the sqrt
+static const tile_t TOTAL_ACC_TILES = (ACC_ROWS / DIM);
+static const tile_t SQRT_ACC_TILES  = (ACC_ROWS_SQRT / DIM);
+
+// num-rows of tile A,B,C,D
+static const bytes_t BYTE_ROWS_PER_TILE = DIM;
+
+// byte-width of tile A,B,C
+static const bytes_t I_TILE_BYTE_WIDTH = DIM * sizeof(elem_t);
+// byte-width of tile D
+static const bytes_t O_TILE_BYTE_WIDTH = DIM * sizeof(acc_t); 
+
 typedef struct gemmini {
-  //-------------------------------------
-  // hardware-specific global constants
-  sp_row_t    GBL_B_SP_ROW_ADDR_1;    // sp row of 1st tmp slot for B-tiles
-  sp_row_t    GBL_B_SP_ROW_ADDR_2;    // sp row of 2nd tmp slot for B-tiles
-
-  tile_t      TOTAL_ACC_TILES;        // how many tiles fit in the accum
-  tile_t      SQRT_ACC_TILES;         // sqrt of above
-
-  bytes_t     BYTE_ROWS_PER_TILE;     // num-rows of tile A,B,C,D
-  bytes_t     I_BYTE_COLS_PER_GROUP;  // byte-width of output-group A,B,C
-  bytes_t     O_BYTE_COLS_PER_GROUP;  // byte-width of output-group D
-  bytes_t     I_TILE_BYTE_WIDTH;      // byte-width of tile A,B,C
-  bytes_t     O_TILE_BYTE_WIDTH;      // byte-width of tile D
-
   //-------------------------------------
   // input data-specific global constants
   bool        HAS_BIAS;               // if computing A*B+D=C, not A*B=C
@@ -132,6 +137,9 @@ typedef struct gemmini {
 
   tile_t      TILE_COLS_PER_GROUP;    // num tiles wide is an output-group
   tile_t      TILE_ROWS_PER_GROUP;    // num tiles tall is an output-group
+
+  bytes_t     I_BYTE_COLS_PER_GROUP;  // byte-width of output-group A,B,C
+  bytes_t     O_BYTE_COLS_PER_GROUP;  // byte-width of output-group D
 
   //-------------------------------------
   // global state persistent across all loops
@@ -198,35 +206,9 @@ init_gemmini_state(size_t M, size_t N, size_t K,
   memset(self, 0, sizeof(gemmini_t));
 
   // define hardcoded constants
-  const size_t I_TILE_BYTE_WIDTH = DIM * sizeof(elem_t);
-  const size_t O_TILE_BYTE_WIDTH = DIM * sizeof(acc_t);
-  const size_t A_BYTE_WIDTH      = K * sizeof(elem_t);
-  const size_t BC_BYTE_WIDTH     = N * sizeof(elem_t);
-  const size_t D_BYTE_WIDTH      = N * sizeof(acc_t);
-
-  //------------------------------------------------------------------------
-  // hardware specific constants
-  //------------------------------------------------------------------------
-  self->GBL_B_SP_ROW_ADDR_1   = (BANK_NUM * BANK_ROWS) - 2*DIM;
-  self->GBL_B_SP_ROW_ADDR_2   = (BANK_NUM * BANK_ROWS) - 1*DIM;
-
-  //self->TILE_ROWS_PER_GROUP   = (BANK_NUM * BANK_ROWS / DIM) - 2;
-  //self->TILE_COLS_PER_GROUP   = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
-  //if(self->TILE_COLS_PER_GROUP == 0) {
-  //  // NOTE: this happens if accumulator size < scratchpad size. Don't do 
-  //  //       this! your accumulator should be much larger than scratchpad!
-  //  self->TILE_ROWS_PER_GROUP = 4;
-  //  self->TILE_COLS_PER_GROUP = (ACC_ROWS / DIM) / self->TILE_ROWS_PER_GROUP;
-  //}
-
-  self->BYTE_ROWS_PER_TILE    = DIM;
-
-  self->TOTAL_ACC_TILES = (ACC_ROWS / DIM);
-  self->SQRT_ACC_TILES  = sqrt(self->TOTAL_ACC_TILES);
-  //self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * I_TILE_BYTE_WIDTH;
-  //self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * O_TILE_BYTE_WIDTH;
-  self->I_TILE_BYTE_WIDTH     = I_TILE_BYTE_WIDTH;
-  self->O_TILE_BYTE_WIDTH     = O_TILE_BYTE_WIDTH;
+  const size_t A_BYTE_WIDTH  = K * sizeof(elem_t);
+  const size_t BC_BYTE_WIDTH = N * sizeof(elem_t);
+  const size_t D_BYTE_WIDTH  = N * sizeof(acc_t);
 
   //------------------------------------------------------------------------
   // input data-specific constants
@@ -265,12 +247,11 @@ init_gemmini_state(size_t M, size_t N, size_t K,
   // dynamically set output-group dimension based on M,N,K sizes
   //------------------------------------------------------------------------
   bool has_dim_fit = false;
-  size_t best_h;
-  size_t best_dist = 0;
-
-  for(size_t h=1; h<=self->TOTAL_ACC_TILES; h+=1) {
-    size_t w = self->TOTAL_ACC_TILES/h;
-    size_t dist = pow(h - self->SQRT_ACC_TILES, 2);
+  tile_t best_h;
+  tile_t best_dist = TOTAL_ACC_TILES+1;
+  for(size_t h=1; h <= TOTAL_ACC_TILES; h+=1) {
+    size_t w = TOTAL_ACC_TILES/h;
+    size_t dist = abs(h - SQRT_ACC_TILES);
     if((h < w) && (self->TILE_ROW_END < h)) {
       if(!has_dim_fit) {
         has_dim_fit = true;
@@ -287,23 +268,23 @@ init_gemmini_state(size_t M, size_t N, size_t K,
         has_dim_fit = true;
         best_h = h;
         best_dist = dist;
-      } 
+      }
       else if (h > best_h) {
         best_h = h;
         best_dist = dist;
       }
     }
-    else if(!has_dim_fit && (dist < best_dist)) {
-      best_h = h;
-      best_dist = dist;
+    else if(!has_dim_fit) {
+      if(dist < best_dist) {
+        best_h = h;
+        best_dist = dist;
+      }
     }
   }
   self->TILE_ROWS_PER_GROUP   = best_h;
-  self->TILE_COLS_PER_GROUP   = self->TOTAL_ACC_TILES / best_h;
-  self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * I_TILE_BYTE_WIDTH;
-  self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP * O_TILE_BYTE_WIDTH;
-  printf("og-size=(%d,%d)\n", 
-      self->TILE_ROWS_PER_GROUP, self->TILE_COLS_PER_GROUP);
+  self->TILE_COLS_PER_GROUP   = TOTAL_ACC_TILES / best_h;
+  self->I_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP *I_TILE_BYTE_WIDTH;
+  self->O_BYTE_COLS_PER_GROUP = self->TILE_COLS_PER_GROUP *O_TILE_BYTE_WIDTH;
 
   return self;
 }
@@ -358,8 +339,8 @@ static void reset_output_group(gemmini_t *self) {
   // define mutable global state mutable by all loops, persist across all ogs
   self->gbl_tile_row          = 0;
   self->gbl_tile_col          = 0;
-  self->gbl_B_cur_sp_row_addr = self->GBL_B_SP_ROW_ADDR_1;
-  self->gbl_B_alt_sp_row_addr = self->GBL_B_SP_ROW_ADDR_2;
+  self->gbl_B_cur_sp_row_addr = GBL_B_SP_ROW_ADDR_1;
+  self->gbl_B_alt_sp_row_addr = GBL_B_SP_ROW_ADDR_2;
   update_tile_dims(self);
 
   // define mutable global state mutable by all loops, reset after each og
@@ -478,7 +459,7 @@ static bool next_A_tile_subcol(gemmini_t *self) {
   self->gbl_CD_acc_row_addr = 0;
   update_tile_dims(self);
 
-  self->loop2_A_mem_addr += self->I_TILE_BYTE_WIDTH;
+  self->loop2_A_mem_addr += I_TILE_BYTE_WIDTH;
   self->loop2_B_mem_addr += self->B_BYTES_PER_TILE_ROW;
   self->loop2_C_mem_addr += 0;
   self->loop2_D_mem_addr += 0;
@@ -534,7 +515,7 @@ static bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
   // modify global state
   self->gbl_tile_row             = self->loop1_tile_row_start;
   self->gbl_tile_col            += 1;
-  self->gbl_CD_acc_row_addr     += self->BYTE_ROWS_PER_TILE;
+  self->gbl_CD_acc_row_addr     += BYTE_ROWS_PER_TILE;
   update_tile_dims(self);
 
   const size_t tmp_B_sp_row_addr = self->gbl_B_cur_sp_row_addr;
@@ -543,9 +524,9 @@ static bool next_B_tile_subcol_in_subrow(gemmini_t *self) {
 
   // modify loop3-local state
   self->loop3_A_mem_addr += 0;
-  self->loop3_B_mem_addr += self->I_TILE_BYTE_WIDTH;
-  self->loop3_C_mem_addr += self->I_TILE_BYTE_WIDTH;
-  self->loop3_D_mem_addr += self->O_TILE_BYTE_WIDTH;
+  self->loop3_B_mem_addr += I_TILE_BYTE_WIDTH;
+  self->loop3_C_mem_addr += I_TILE_BYTE_WIDTH;
+  self->loop3_D_mem_addr += O_TILE_BYTE_WIDTH;
 
   DBG_LOOP("    next_B_tile_subcol_in_subrow   ");
   return true;
@@ -558,8 +539,7 @@ static void maybe_move_next_B_tile_into_sp(gemmini_t *self) {
   }
 
   // calculate mvin parameters
-  const size_t B_mem_addr    = self->loop3_B_mem_addr + 
-                               self->I_TILE_BYTE_WIDTH;
+  const size_t B_mem_addr    = self->loop3_B_mem_addr + I_TILE_BYTE_WIDTH;
   const size_t B_mem_stride  = self->B_BYTES_PER_ROW;
   const size_t B_sp_row_addr = self->gbl_B_alt_sp_row_addr;
   const size_t B_item_rows   = self->loop2_k_item_dims;
@@ -598,7 +578,7 @@ static bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
   }
   // modify global state
   self->gbl_tile_row        += 1;
-  self->gbl_CD_acc_row_addr += self->BYTE_ROWS_PER_TILE;
+  self->gbl_CD_acc_row_addr += BYTE_ROWS_PER_TILE;
   update_tile_dims(self);
 
   // modify loop4-local state
@@ -607,7 +587,7 @@ static bool next_A_tile_subrow_in_subcol(gemmini_t *self) {
   self->loop4_D_mem_addr    += (self->HAS_BIAS && !self->REPEATING_BIAS) ?
                                self->D_BYTES_PER_TILE_ROW : 0;
 
-  self->loop4_A_sp_row_addr += self->BYTE_ROWS_PER_TILE;
+  self->loop4_A_sp_row_addr += BYTE_ROWS_PER_TILE;
 
   DBG_LOOP("      next_A_tile_subrow_in_subcol ");
   return true;
