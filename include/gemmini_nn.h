@@ -249,6 +249,8 @@ static void im2col(size_t batch_size, size_t channels, size_t im_dim,
     elem_t output[I][K],
     const struct ConvParams * params)
 {
+    printf("IM2COL_PARAMS:    - [%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u]\n", batch_size, channels, im_dim, I, K, 
+        params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
     int patch_row = 0;
 
     for (int n_batch = 0; n_batch < params->batch_size; n_batch++) {
@@ -286,6 +288,8 @@ static void im2col_with_col2im(size_t prev_I, size_t prev_J,
     elem_t output[next_I][next_K],
     const struct ConvParams * params)
 {
+    printf("IM2COL_COL2IM_PARAMS:    - [%u, %u, %u, %u, %u, %u, %u, %u, %u, %u]\n", prev_I, prev_J, next_I, next_K, 
+        params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
     int out_row = 0;
 
     for (int n_batch = 0; n_batch < params->batch_size; n_batch++) {
