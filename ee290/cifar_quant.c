@@ -50,34 +50,13 @@ int main (int argc, char * argv[]) {
     printf("starting layer 1\n");
     start = read_cycles();
 
-    #ifdef USE_HW_TILER
-        setup_im2col_addr_mode(CFG_A, &conv_1_params); // FIXME: probably indicate it's for `A`
-    #else 
-        im2col(conv_1_params.batch_size, conv_1_params.in_channels, conv_1_params.in_dim,
-            conv_1_params.I, conv_1_params.K,
-            images, conv_1_in, &conv_1_params);
-    #endif // USE_FSM_TILER
-        
-    end = read_cycles();
-    im2col_cycles += end - start;
-
-    start = read_cycles();
-
-    #ifdef USE_HW_TILER
-        tiled_matmul_nn_auto(conv_1_params.I, conv_1_params.J, conv_1_params.K,
-            images, conv_1_w, NULL, conv_1_out, // Sole difference: uses `images` address for A
+    im2col_and_matmul(conv_1_params.batch_size, conv_1_params.in_channels, conv_1_params.in_dim,
+            images, &conv_1_params,
+            conv_1_params.I, conv_1_params.J, conv_1_params.K,
+            conv_1_in, conv_1_w, NULL, conv_1_out, 
             RELU, conv_1_params.output_scale, true,
-            tiled_matmul_type, check, "conv_1");
-        gemmini_config_reset();
-    #else 
-        tiled_matmul_nn_auto(conv_1_params.I, conv_1_params.J, conv_1_params.K,
-            conv_1_in, conv_1_w, NULL, conv_1_out,
-            RELU, conv_1_params.output_scale, true,
-            tiled_matmul_type, check, "conv_1");
-    #endif // USE_FSM_TILER
-
-    end = read_cycles();
-    matmul_cycles += end - start;
+            tiled_matmul_type, check, "conv_1",
+            &im2col_cycles, &matmul_cycles, CFG_A);
 
     start = read_cycles();
 

@@ -243,21 +243,8 @@ static void conv_dw_with_col2im(size_t prev_I, size_t prev_J, size_t I, size_t J
     }
 }
 
-#ifdef USE_HW_TILER
-
 typedef enum {CFG_A=0, CFG_B=1, CFG_C=2, CFG_D=3} WhichMatrix;
 
-void setup_im2col_addr_mode(const WhichMatrix mat, const struct ConvParams * params)
-{
-    printf("IM2COL CONFIG CMD\n");
-    printf("IM2COL CONFIG PARAMS:    - [%u, %u, %u, %u, %u, %u]\n", 
-        params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
-    gemmini_config_addr_mode(mat, 1, params->in_dim, params->in_dim, params->batch_size, params->in_channels, params->padding, params->kernel_size, params->stride);
-    // printf("IM2COL_PARAMS:    - [%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u]\n", batch_size, channels, im_dim, I, K, 
-        // params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
-}
-
-#endif // USE_HW_TILER
 
 static void im2col(size_t batch_size, size_t channels, size_t im_dim,
     size_t I, size_t K,
@@ -297,6 +284,95 @@ static void im2col(size_t batch_size, size_t channels, size_t im_dim,
         }
     }
 }
+
+#ifdef USE_HW_TILER
+
+void setup_im2col_addr_mode(const WhichMatrix mat, const struct ConvParams * params)
+{
+    printf("IM2COL CONFIG CMD\n");
+    printf("IM2COL CONFIG PARAMS:    - [%u, %u, %u, %u, %u, %u]\n", 
+        params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
+    gemmini_config_addr_mode(mat, 1, params->in_dim, params->in_dim, params->batch_size, params->in_channels, params->padding, params->kernel_size, params->stride);
+}
+
+static void im2col_and_matmul(  // This parameter list is, well, a mouthful. 
+    size_t batch_size, size_t channels, size_t im_dim,
+    const elem_t input[batch_size][im_dim][im_dim][channels],
+    const struct ConvParams * params,
+    size_t dim_I, size_t dim_J, size_t dim_K,
+    const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
+    const void * D, elem_t C[dim_I][dim_J],
+    int act, int shift, bool repeating_bias,
+    enum tiled_matmul_type_t tiled_matmul_type,
+    bool check, char * layer_name,
+    uint64_t * im2col_cycles, uint64_t * matmul_cycles, WhichMatrix mat)
+{
+    // Im2Col + Matmul, Hardware Edition
+    // "Im2Col" here just sends an addressing-config command to Gemmini
+    // Note the `A` parameter is ignore altogether. 
+    // The address of `input` is instead passed to Gemmini for inline im2col-ing
+    // GCC (probably rightfully) warns about this quite a bit, as `input` and `A` are of different sizes.
+    // But, (a) it builds, and more importantly, (b) we only use the address of `input[0]`, not its size.
+
+    uint64_t start, end;
+    start = read_cycles();
+    setup_im2col_addr_mode(mat, params);
+    end = read_cycles();
+    *im2col_cycles += end - start;
+
+    start = read_cycles();
+    tiled_matmul_nn_auto(params->I, params->J, params->K,
+        input, B, D, C,  // Note `A` is ignored
+        act, shift, repeating_bias,
+        tiled_matmul_type, check, layer_name);
+    end = read_cycles();
+    *matmul_cycles += end - start;
+
+    // Undo our addressing-mode changes
+    gemmini_config_reset();
+}
+
+
+#else 
+
+static void im2col_and_matmul(  // This parameter list is, well, a mouthful. 
+    size_t batch_size, size_t channels, size_t im_dim,
+    const elem_t input[batch_size][im_dim][im_dim][channels],
+    const struct ConvParams * params,
+    size_t dim_I, size_t dim_J, size_t dim_K,
+    const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
+    const void * D, elem_t C[dim_I][dim_J],
+    int act, int shift, bool repeating_bias,
+    enum tiled_matmul_type_t tiled_matmul_type,
+    bool check, char * layer_name,
+    uint64_t * im2col_cycles, uint64_t * matmul_cycles, WhichMatrix mat)
+{
+    // Only im2col on A-matrix; throw an error otherwise
+    if (mat != 0) {
+        printf("GEMMINI ERROR: software im2col+matmul supported on A-matrix only");
+        exit(1);
+    }
+
+    uint64_t start, end;
+    start = read_cycles();
+    im2col(params->batch_size, params->in_channels, params->in_dim,
+        params->I, params->K,
+        input, A, params);
+    end = read_cycles();
+    *im2col_cycles += end - start;
+
+    start = read_cycles();
+    tiled_matmul_nn_auto(params->I, params->J, params->K,
+        A, B, D, C, 
+        act, shift, repeating_bias,
+        tiled_matmul_type, check, layer_name);
+    end = read_cycles();
+    *matmul_cycles += end - start;
+}
+
+#endif // USE_HW_TILER
+
+
 
 static void im2col_with_col2im(size_t prev_I, size_t prev_J,
     size_t next_I, size_t next_K,
