@@ -56,7 +56,8 @@ tiled_matmul_auto(size_t dim_I, size_t dim_J, size_t dim_K,
   if(is_valid_to_continue(dim_I, dim_J, dim_K, A, B, D, C, 
                           act, shift, repeating_bias, tiled_matmul_type)) {
     // [ssteffl] TODO: should we reset every time?
-    gemmini_config_reset();
+    // [df] TODO: not if we want to retain config state, e.g. im2col addressing
+    // gemmini_config_reset();
     gemmini_config_addr_ab((uintptr_t)A, (uintptr_t)B);
     gemmini_config_addr_cd((uintptr_t)C, (uintptr_t)D);
     gemmini_config_size0(dim_I, dim_J);

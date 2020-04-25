@@ -243,6 +243,22 @@ static void conv_dw_with_col2im(size_t prev_I, size_t prev_J, size_t I, size_t J
     }
 }
 
+#ifdef USE_HW_TILER
+
+typedef enum {CFG_A=0, CFG_B=1, CFG_C=2, CFG_D=3} WhichMatrix;
+
+void setup_im2col_addr_mode(const WhichMatrix mat, const struct ConvParams * params)
+{
+    printf("IM2COL CONFIG CMD\n");
+    printf("IM2COL CONFIG PARAMS:    - [%u, %u, %u, %u, %u, %u]\n", 
+        params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
+    gemmini_config_addr_mode(mat, 1, params->in_dim, params->in_dim, params->batch_size, params->in_channels, params->padding, params->kernel_size, params->stride);
+    // printf("IM2COL_PARAMS:    - [%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u]\n", batch_size, channels, im_dim, I, K, 
+        // params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
+}
+
+#endif // USE_HW_TILER
+
 static void im2col(size_t batch_size, size_t channels, size_t im_dim,
     size_t I, size_t K,
     const elem_t input[batch_size][im_dim][im_dim][channels],

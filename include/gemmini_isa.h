@@ -41,6 +41,11 @@
 #define k_SIZE1    13
 #define k_RPT_BIAS 14
 #define k_RESET    15
+#define k_COMPUTE  16
+#define k_CFG_A    17
+#define k_CFG_B    18
+#define k_CFG_C    19
+#define k_CFG_D    20
 
 //============================================================================
 // config-opcode parameters
@@ -140,10 +145,16 @@
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, repeating_bias, 0, k_RPT_BIAS)
 
 #define gemmini_compute() \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_COMPUTE_PRELOADED)
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_COMPUTE)
 
 #define gemmini_config_reset() \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_RESET)
+
+#define gemmini_config_addr_mode(mat, mode, rows, cols, batch_size, channels, padding, kernel_size, stride) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, (((uint64_t)(rows) << 32) | (uint64_t)(cols)), \
+  (((uint64_t)(mat) << 60) | ((uint64_t)(mode) << 56) | ((uint64_t)(stride) << 48) | ((uint64_t)(padding) << 40) | ((uint64_t)(channels) << 32) | \
+   ((uint64_t)(kernel_size)) << 16 | ((uint64_t)batch_size)), \
+    k_CFG_A)
 
 #endif // __GEMMINI_ISA_H__
 
