@@ -59,7 +59,7 @@
 //============================================================================
 #define XCUSTOM_ACC 3
 
-#define GARBAGE_ADDR ((uint64_t)(-1))
+#define GARBAGE_ADDR ((uint32_t)(-1))
 #define OUTPUT_STATIONARY 0
 #define WEIGHT_STATIONARY 1
 
@@ -80,37 +80,92 @@
 // original gemmini isa
 //============================================================================
 
-// mvin and mvout
+// mvin
+#define gemmini_extended_mvin(dram_addr, spad_addr, cols, rows) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, \
+      ((uint64_t)  (rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(cols) <<  ADDR_LEN) | \
+        ((uint64_t)(spad_addr)), \
+      k_MVIN)
+
 #define gemmini_mvin(dram_addr, spad_addr) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, ((uint64_t)1 << ADDR_LEN) | (spad_addr), k_MVIN)
+  gemmini_extended_mvin(dram_addr, spad_addr, DIM, DIM)
 
 #define gemmini_block_mvin(dram_addr, spad_addr, len) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, ((uint64_t)(len) << ADDR_LEN) | (spad_addr), k_MVIN)
+  gemmini_extended_mvin(dram_addr, spad_addr, (len) * DIM, DIM)
+
+// mvout
+#define gemmini_extended_mvout(dram_addr, spad_addr, cols, rows) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, \
+      ((uint64_t)  (rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(cols) <<  ADDR_LEN) | \
+        ((uint64_t)(spad_addr)), \
+      k_MVOUT)
 
 #define gemmini_mvout(dram_addr, spad_addr) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, dram_addr, spad_addr, k_MVOUT)
+  gemmini_extended_mvout(dram_addr, spad_addr, DIM, DIM)
 
 // compute
+#define gemmini_extended_compute_preloaded(A, BD, A_cols, A_rows, BD_cols, BD_rows) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
+      ((uint64_t)  (A_rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(A_cols) <<  ADDR_LEN) | \
+        ((uint64_t)(A)), \
+      ((uint64_t)  (BD_rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(BD_cols) <<  ADDR_LEN) | \
+        ((uint64_t)(BD)), \
+      k_COMPUTE_PRELOADED)
+
+#define gemmini_extended_compute_accumulated(A, BD, A_cols, A_rows, BD_cols, BD_rows) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
+      ((uint64_t)  (A_rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(A_cols) <<  ADDR_LEN) | \
+        ((uint64_t)(A)), \
+      ((uint64_t)  (BD_rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(BD_cols) <<  ADDR_LEN) | \
+        ((uint64_t)(BD)), \
+      k_COMPUTE_ACCUMULATE)
+
 #define gemmini_compute_preloaded(A, BD) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, A, BD, k_COMPUTE_PRELOADED)
+  gemmini_extended_compute_preloaded(A, BD, DIM, DIM, DIM, DIM)
 
 #define gemmini_compute_accumulated(A, BD) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, A, BD, k_COMPUTE_ACCUMULATE)
+  gemmini_extended_compute_accumulated(A, BD, DIM, DIM, DIM, DIM)
 
 // preload
-#define gemmini_preload(BD, C) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, BD, C, k_PRELOAD)
+#define gemmini_extended_preload(BD, C, BD_cols, BD_rows, C_cols, C_rows) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
+      ((uint64_t)(BD_rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(BD_cols) << ADDR_LEN) | \
+        (uint64_t)(BD), \
+      ((uint64_t)(C_rows) << (ADDR_LEN + 16)) | \
+        ((uint64_t)(C_cols) << ADDR_LEN) | \
+        (uint64_t)(C), \
+      k_PRELOAD)
 
-#define matmul_preload_zeros(C) \
+#define gemmini_preload(BD, C) \
+  gemmini_extended_preload(BD, C, DIM, DIM, DIM, DIM)
+
+#define gemmini_preload_zeros(C) \
   gemmini_preload(GARBAGE_ADDR, C)
 
 // weight-stationary matmul loop
 #define gemmini_loop_ws(A, B, I, J, K, bias) \
-    ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, ((uint64_t)(B) << 32) | (A), ((uint64_t)(bias) << 48) | ((uint64_t)(K) << 32) | ((J) << 16) | (I), k_LOOP_WS)
+    ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
+      ((uint64_t)(B) << 32) | (A), \
+      ((uint64_t)(bias) << 48) | ((uint64_t)(K) << 32) | ((J) << 16) | (I),\
+      k_LOOP_WS)
 
 // config
 #define gemmini_config_ex(mode, act, sys_shift, acc_shift, relu6_shift) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, ((uint64_t)(acc_shift) << 32) | ((act) << 3) | ((mode) << 2) | CONFIG_EX, ((uint64_t)(relu6_shift) << 32) | (sys_shift), k_CONFIG)
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
+    ((uint64_t)(acc_shift) << 32) | \
+      ((act) << 3) | \
+      ((mode) << 2) | \
+      CONFIG_EX,\
+    ((uint64_t)(relu6_shift) << 32) | \
+      (sys_shift), \
+    k_CONFIG)
 
 #define gemmini_config_ld(stride) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, CONFIG_LD, stride, k_CONFIG)

@@ -1,5 +1,5 @@
 #tests = \
-# echo \
+#	echo \
 #	mvin_mvout \
 #	mvin_mvout_stride \
 #	mvin_mvout_acc \
@@ -9,9 +9,15 @@
 #	matmul \
 #	raw_hazard \
 #	aligned \
+#	padded \
+#	tiled_matmul_os \
+#	tiled_matmul_ws \
+#	tiled_matmul_cpu \
+#	tiled_matmul_option \
 #	template
 
 tests := \
 	echo \
-	template \
-
+ 	padded \
+ 	tiled_matmul_ws \
+	template

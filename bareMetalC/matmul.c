@@ -6,9 +6,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
-#ifndef BAREMETAL
-#include <sys/mman.h>
-#endif
 #include <time.h>
 #include "include/gemmini.h"
 
@@ -129,10 +126,10 @@ void test_os() {
           out_addr = GARBAGE_ADDR;
 
         if (!preload[c]) {
-          matmul_preload_zeros(out_addr);
+          gemmini_preload_zeros(out_addr);
           gemmini_compute_accumulated(A_addr + a*DIM, B_addr + b*DIM);
         } else if (preload_zeros[c]) {
-          matmul_preload_zeros(out_addr);
+          gemmini_preload_zeros(out_addr);
           gemmini_compute_preloaded(A_addr + a*DIM, B_addr + b*DIM);
         } else {
           gemmini_preload(D_addr + d*DIM, out_addr);
@@ -277,13 +274,13 @@ void test_ws() {
           matrelu6(gold[g], gold[g], 1 << relu6_shift);
       }
 
-      int A_addr = 0;
-      int B_addr = BANK_ROWS; // N*DIM;
-      int D_addr = 2*BANK_ROWS; // 2*N*DIM;
+      uint32_t A_addr = 0;
+      uint32_t B_addr = BANK_ROWS; // N*DIM;
+      uint32_t D_addr = 2*BANK_ROWS; // 2*N*DIM;
       uint32_t C_addr_acc = 1 << (ADDR_LEN-1);
 
       // Calculate the proper destination addresses of everything
-      int C_addrs[N*N*N];
+      uint32_t C_addrs[N*N*N];
       for (size_t c = 0; c < N*N*N; ++c)
         C_addrs[c] = C_addr_acc + c*DIM;
       for (size_t c = 0; c < N*N*N; ++c) {
@@ -318,7 +315,7 @@ void test_ws() {
           d_addr = GARBAGE_ADDR;
 
         if (!preload[c]) {
-          matmul_preload_zeros(C_addrs[c]);
+          gemmini_preload_zeros(C_addrs[c]);
           gemmini_compute_accumulated(A_addr + a*DIM, d_addr);
         } else {
           gemmini_preload(B_addr + b*DIM, C_addrs[c]);
@@ -353,17 +350,11 @@ void test_ws() {
 }
 
 int main() {
-#ifndef BAREMETAL
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-      perror("mlockall failed");
-      exit(1);
-    }
-#endif
-
+  pin_all();
   gemmini_flush(0);
 
-  for (size_t i = 0; i < 8; i++) {
-    if (rand() % 2)
+  for (size_t i = 0; i < 4; i++) {
+    if (i % 2)
       test_os();
     else
       test_ws();

@@ -17,8 +17,9 @@
 #include <limits.h>
 #include <stdbool.h>
 
-#include "gemmini_params.h"
-#include "gemmini_isa.h"
+#include "include/gemmini_params.h"
+#include "include/gemmini_isa.h"
+#include "include/util.h"
 
 //============================================================================
 // pk/linux page-fault prevention mechanisms
@@ -29,25 +30,33 @@
 //   gemmini for accelerator-initiated page-fault handling, but this seems
 //   like a lot of work.
 //============================================================================
+static bool all_pinned = false;
+
 #ifdef GEMMINI_LINUX
 #include <sys/mman.h>
-static inline void pin_matrices(size_t M, size_t N, size_t K,
-        const elem_t A[M][K], const elem_t B[K][N],
-        const acc_t * D, elem_t C[M][N], bool repeating_bias) {
+static inline void pin_all() {
+  if(all_pinned) return;
+  all_pinned = true;
   if (mlockall(MCL_CURRENT) != 0) {
     perror("mlockall failed");
     exit(1);
   }
 }
-static inline void unpin_matrices() {
+static inline void unpin_all() {
+  if(!all_pinned) return;
+  all_pinned = false;
   if (munlockall()) {
     perror("munlockall failed");
     exit(1);
   }
 }
+#define pin_matrices(M,N,K,A,B,D,C,r) do {} while(0)
+#define unpin_matrices() do {} while(0)
 #else
 #ifdef GEMMINI_PK
 #define PAGESIZE 0x1000
+#define pin_all() do {} while(0)
+#define unpin_all() do {} while(0)
 static inline void __pin_vector(const char*vec, size_t len) {
   volatile char item[4];
   size_t i;
@@ -62,11 +71,13 @@ static inline void __pin_vector(const char*vec, size_t len) {
   if(i-1*PAGESIZE < len) item[2] = vec[i-1*PAGESIZE];
                          item[3] = vec[len-1];
 }
-
-static inline void pin_matrices(size_t M, size_t N, size_t K,
-        const elem_t A[M][K], const elem_t B[K][N],
-        const acc_t * D, elem_t C[M][N], bool repeating_bias) 
+static inline void pin_matrices(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  bool repeating_bias) 
 {
+  // this is really inefficient, but we don't have mlockall() in newlib, so the
+  // best we can do is just touch every page before the accelerator uses it
   const char* A_vec = (const char*)A;
   const char* B_vec = (const char*)B;
   const char* C_vec = (const char*)C;
@@ -85,6 +96,8 @@ static inline void pin_matrices(size_t M, size_t N, size_t K,
 #define unpin_matrices() do {} while(0)
 #else 
 // GEMMINI_BAREMETAL
+#define pin_all() do {} while(0)
+#define unpin_all() do {} while(0)
 #define pin_matrices(M,N,K,A,B,D,C,r) do {} while(0)
 #define unpin_matrices() do {} while(0)
 #endif // GEMMINI_PK
@@ -93,6 +106,31 @@ static inline void pin_matrices(size_t M, size_t N, size_t K,
 //============================================================================
 // miscellaneous utility functions
 //============================================================================
+
+#define default_if_zero(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   ((_a == 0) ? _b : _a); })
+
+#define round_up(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   (((_a + _b - 1) / _b) * _b); })
+
+#define div_round_up(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   ((_a + _b - 1) / _b); })
+
+#define min(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   _a <= _b ? _a : _b; })
+
+#define max(a,b) \
+ ({ __typeof__ (a) _a = (a); \
+    __typeof__ (b) _b = (b); \
+   _a >= _b ? _a : _b; })
 
 // Matmul utility functions
 void matmul(elem_t A[DIM][DIM], elem_t B[DIM][DIM], elem_t D[DIM][DIM], int64_t C_full[DIM][DIM]) {
@@ -205,6 +243,7 @@ int rand() {
   return x >> 24;
 }
 
+# define PCT(n, d) ((100.0*(double)n/(double)d))
 uint64_t read_cycles() {
     uint64_t cycles;
     asm volatile ("rdcycle %0" : "=r" (cycles));
@@ -215,36 +254,53 @@ uint64_t read_cycles() {
     // return *mtime;
 }
 
-static void matmul_cpu(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J], const void * D,
-        elem_t C[dim_I][dim_J],
-        int act, int shift, bool repeating_bias) {
-
-  const bool no_bias = D == NULL;
-
-  for (size_t i = 0; i < dim_I; i++) {
-    for (size_t j = 0; j < dim_J; j++) {
+//============================================================================
+// do matmul with activation (and other bells & whistles) on cpu
+//============================================================================
+static void matmul_cpu_raw(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t *D, elem_t *C,
+  int act, size_t in_shift, size_t relu6_shift, bool repeating_bias) 
+{
+  const bool no_bias = (D == NULL);
+  for (size_t i = 0; i < M; i++) {
+    for (size_t j = 0; j < N; j++) {
       size_t bias_row = repeating_bias ? 0 : i;
-      acc_t result = no_bias ? 0 : ((acc_t (*)[dim_J])D)[bias_row][j];
-
-      for (size_t k = 0; k < dim_K; k++) {
-        result += A[i][k] * B[k][j];
+      acc_t result = no_bias ? 0 : ((acc_t (*)[N])D)[bias_row][j];
+      for (size_t k = 0; k < K; k++) {
+        result += A[i*K + k] * B[k*N + j];
       }
-
-      // Shift while rounding to nearest integer (ties round to negative infinity)
-      result = ROUNDING_RIGHT_SHIFT(result, shift);
+      // Shift while rounding to nearest integer 
+      // (ties round to negative infinity)
+      result = ROUNDING_RIGHT_SHIFT(result, in_shift);
 
       // Clip result
-      result = result > elem_t_max ? elem_t_max : (result < elem_t_min ? elem_t_min : result);
+      result = (result > elem_t_max) 
+                ? elem_t_max 
+                : (result < elem_t_min ? elem_t_min : result);
 
       // Apply activation function
       if (act == RELU) {
         result = result < 0 ? 0 : result;
       }
-
-      C[i][j] = (elem_t)result;
+      else if (act == RELU6) {
+        int max = 6 << relu6_shift;
+        result = result < 0 ? 0 : (result > max ? max : result);
+      }
+      C[i*N + j] = (elem_t)result;
     }
   }
+}
+
+static void matmul_cpu(
+  size_t M, size_t N, size_t K,
+  const elem_t A[M][K], const elem_t B[K][N], const acc_t *D, elem_t C[M][N],
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias) 
+{
+  PRINT("DEPRECATED!!!!!!!!! matmul_cpu with 2-D matrix notation");
+  matmul_cpu_raw(
+    M, N, K, (const elem_t*)A, (const elem_t*)B, D, (elem_t*) C, 
+    act, shift, relu6_shift, repeating_bias);
 }
 
 //============================================================================
@@ -264,5 +320,25 @@ enum tiled_matmul_type_t {OS, WS, CPU};
 #endif // USE_FSM_TILER
 #endif // USE_HW_TILER
 
-#endif // __GEMMINI_H__
+static void tiled_matmul_auto(
+  size_t M, size_t N, size_t K,
+  const elem_t A[M][K], const elem_t B[K][N],
+  const acc_t * D, elem_t C[M][N],
+  int act, size_t shift, size_t relu6_shift, bool repeating_bias,
+  enum tiled_matmul_type_t mm_type)
+{
+  PRINT("DEPRECATED!!!!!!!!! tiled_matmul_auto with 2-D matrix notation");
+  tiled_matmul_auto_raw(
+    M, N, K, (const elem_t*)A, (const elem_t*)B, D, (elem_t*)C, 
+    act, shift, relu6_shift, repeating_bias, mm_type);
+}
 
+void gemm_auto(
+  size_t M, size_t N, size_t K,
+  const elem_t *A, const elem_t *B, const acc_t * D, elem_t *C,
+  bool repeating_bias, enum tiled_matmul_type_t mm_type) 
+{
+  tiled_matmul_auto_raw(M, N, K, A, B, D, C, 0,0,0,repeating_bias, mm_type);
+}
+
+#endif // __GEMMINI_H__

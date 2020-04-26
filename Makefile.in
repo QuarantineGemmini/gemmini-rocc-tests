@@ -23,5 +23,3 @@ $(CATEGORIES):
 	 	src_dir=$(abs_top_srcdir)/$@ \
 	 	XLEN=$(XLEN) \
 	 	PREFIX=$(ROCC)-$@
-
-

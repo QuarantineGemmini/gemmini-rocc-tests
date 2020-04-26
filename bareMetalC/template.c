@@ -42,11 +42,12 @@ void gemmini2_body(elem_t In[DIM][DIM],       acc_t D[DIM][DIM],
   printf("Configured Gemmini2 ISA\n");
   printf("Multiply \"In\" matrix with \"Identity\" matrix with a bias of 0\n");
 
-  tiled_matmul_nn_auto(DIM, DIM, DIM, In, Identity, D, Out, 0, 0, 0, WEIGHT_STATIONARY, false, "not_a_layer");
+  tiled_matmul_nn_auto(DIM, DIM, DIM, In, Identity, D, Out, 0, 0, 0, 0, WEIGHT_STATIONARY, false, "not_a_layer");
 }
 
 //============================================================================
 int main() {
+  pin_all();
   printf("Flush Gemmini TLB of stale virtual addresses\n");
   gemmini_flush(0);
 
@@ -69,16 +70,16 @@ int main() {
 
   elem_t Out[DIM][DIM];
 
-  pin_matrices(DIM, DIM, DIM, In, Identity, (const acc_t*)D, Out, false);
+  pin_matrices(DIM, DIM, DIM, (elem_t*)In, (elem_t*)Identity, 
+        (const acc_t*)D, (elem_t*)Out, false);
 #ifdef USE_HW_TILER
   gemmini2_body(In, D, Identity, Out);
 #else
   gemmini1_body(In, D, Identity, Out);
 #endif
-  unpin_matrices();
-
   printf("Fence till Gemmini completes all memory operations\n");
   gemmini_fence();
+  unpin_matrices();
 
   printf("Check whether \"In\" and \"Out\" matrices are identical\n");
   if (!is_equal(In, Out)) {

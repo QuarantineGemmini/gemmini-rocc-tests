@@ -67,44 +67,12 @@ struct FcParams {
             printf("%d: %d times\n", num, count); \
     }
 
-// This function runs a tiled matrix multiplication, with explicit tiling
-// factors
-static void tiled_matmul_nn(size_t dim_I, size_t dim_J, size_t dim_K,
-        const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
-        const void * D, elem_t C[dim_I][dim_J],
-        int act, int shift, bool repeating_bias,
-        size_t tile_I, size_t tile_J, size_t tile_K,
-        enum tiled_matmul_type_t tiled_matmul_type,
-        bool check, char * layer_name)
-{
-    if (check)
-        printf("%s: gemmini\n", layer_name);
-
-    tiled_matmul(dim_I, dim_J, dim_K,
-        A, B, D, C, act, shift, repeating_bias,
-        tile_I, tile_J, tile_K,
-        tiled_matmul_type);
-
-    if (check) {
-        printf("%s: CPU\n", layer_name);
-        elem_t gold[dim_I][dim_J];
-        tiled_matmul_auto(dim_I, dim_J, dim_K,
-            A, B, D, gold, act, shift, repeating_bias,
-            CPU);
-
-        if (!MAT_IS_EQUAL(dim_I, dim_J, C, gold)) {
-            printf("Layer calculated incorrectly: %s\n", layer_name);
-            exit(1);
-        }
-    }
-}
-
 // This function runs a tiled matrix multiplication, with automatically
 // calculated tiling factors
 static void tiled_matmul_nn_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         const elem_t A[dim_I][dim_K], const elem_t B[dim_K][dim_J],
         const void * D, elem_t C[dim_I][dim_J],
-        int act, int shift, bool repeating_bias,
+        int act, size_t shift, size_t relu6_shift, bool repeating_bias,
         enum tiled_matmul_type_t tiled_matmul_type,
         bool check, char * layer_name)
 {
@@ -112,14 +80,14 @@ static void tiled_matmul_nn_auto(size_t dim_I, size_t dim_J, size_t dim_K,
         printf("%s: gemmini\n", layer_name);
 
     tiled_matmul_auto(dim_I, dim_J, dim_K,
-        A, B, D, C, act, shift, repeating_bias,
+        A, B, D, C, act, shift, relu6_shift, repeating_bias,
         tiled_matmul_type);
 
     if (check) {
         printf("%s: CPU\n", layer_name);
         elem_t gold[dim_I][dim_J];
         tiled_matmul_auto(dim_I, dim_J, dim_K,
-            A, B, D, gold, act, shift, repeating_bias,
+            A, B, D, gold, act, shift, relu6_shift, repeating_bias,
             CPU);
 
         if (!MAT_IS_EQUAL(dim_I, dim_J, C, gold)) {
@@ -323,7 +291,7 @@ static void im2col_and_matmul(  // This parameter list is, well, a mouthful.
     start = read_cycles();
     tiled_matmul_nn_auto(params->I, params->J, params->K,
         input, B, D, C,  // Note `A` is ignored
-        act, shift, repeating_bias,
+        act, shift, 0, repeating_bias,
         tiled_matmul_type, check, layer_name);
     end = read_cycles();
     *matmul_cycles += end - start;
@@ -364,7 +332,7 @@ static void im2col_and_matmul(  // This parameter list is, well, a mouthful.
     start = read_cycles();
     tiled_matmul_nn_auto(params->I, params->J, params->K,
         A, B, D, C, 
-        act, shift, repeating_bias,
+        act, shift, 0, repeating_bias,
         tiled_matmul_type, check, layer_name);
     end = read_cycles();
     *matmul_cycles += end - start;
