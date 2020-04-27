@@ -44,22 +44,14 @@ int main (int argc, char * argv[]) {
     uint64_t start, end;
     uint64_t im2col_cycles = 0, matmul_cycles = 0, pool_cycles = 0, conv_dw_cycles = 0, res_add_cycles = 0, other_cycles = 0;
 
-    // conv_1
-    start = read_cycles();
-    
-    im2col(conv_1_params.batch_size, conv_1_params.in_channels, conv_1_params.in_dim,
-        conv_1_params.I, conv_1_params.K,
-        images, conv_1_in, &conv_1_params);
-    
-    end = read_cycles();
-    im2col_cycles += end - start;
-
-    start = read_cycles();
-
-    tiled_matmul_nn_auto(conv_1_params.I, conv_1_params.J, conv_1_params.K,
+    // conv_1    
+    im2col_and_matmul(conv_1_params.batch_size, conv_1_params.in_channels, conv_1_params.in_dim,
+        images, &conv_1_params,
+        conv_1_params.I, conv_1_params.J, conv_1_params.K,
         conv_1_in, conv_1_w, conv_1_b, conv_1_out,
         RELU, conv_1_params.output_scale, 0, true,
-        tiled_matmul_type, check, "conv_1");
+        tiled_matmul_type, check, "conv_1",
+        &im2col_cycles, &matmul_cycles, CFG_A);
 
     end = read_cycles();
     matmul_cycles += end - start;
@@ -74,24 +66,13 @@ int main (int argc, char * argv[]) {
     pool_cycles += end - start;
 
     // conv_2
-    start = read_cycles();
-    
-    im2col(conv_2_params.batch_size, conv_2_params.in_channels, conv_2_params.in_dim,
-        conv_2_params.I, conv_2_params.K,
-        conv_1_out_pooled, conv_2_in, &conv_2_params);
-    
-    end = read_cycles();
-    im2col_cycles += end - start;
-
-    start = read_cycles();
-
-    tiled_matmul_nn_auto(conv_2_params.I, conv_2_params.J, conv_2_params.K,
+    im2col_and_matmul(conv_2_params.batch_size, conv_2_params.in_channels, conv_2_params.in_dim,
+        conv_1_out_pooled, &conv_2_params,
+        conv_2_params.I, conv_2_params.J, conv_2_params.K,
         conv_2_in, conv_2_w, conv_2_b, conv_2_out,
         RELU, conv_2_params.output_scale, 0, true,
-        tiled_matmul_type, check, "conv_2");
-
-    end = read_cycles();
-    matmul_cycles += end - start;
+        tiled_matmul_type, check, "conv_2",
+        &im2col_cycles, &matmul_cycles, CFG_A);
 
     // conv_3
     start = read_cycles();
@@ -125,25 +106,14 @@ int main (int argc, char * argv[]) {
     matmul_cycles += end - start;
 
     // Downsampling conv_1_out_pooled
-    // conv_5
-    start = read_cycles();
-    
-    im2col(conv_5_params.batch_size, conv_5_params.in_channels, conv_5_params.in_dim,
-        conv_5_params.I, conv_5_params.K,
-        conv_1_out_pooled, conv_5_in, &conv_5_params);
-    
-    end = read_cycles();
-    im2col_cycles += end - start;
-
-    start = read_cycles();
-
-    tiled_matmul_nn_auto(conv_5_params.I, conv_5_params.J, conv_5_params.K,
+    // conv_5 
+    im2col_and_matmul(conv_5_params.batch_size, conv_5_params.in_channels, conv_5_params.in_dim,
+        conv_1_out_pooled, &conv_5_params, 
+        conv_5_params.I, conv_5_params.J, conv_5_params.K,
         conv_5_in, conv_5_w, conv_5_b, conv_5_out,
         NO_ACTIVATION, conv_5_params.output_scale, 0, true,
-        tiled_matmul_type, check, "conv_5");
-
-    end = read_cycles();
-    matmul_cycles += end - start;
+        tiled_matmul_type, check, "conv_5",
+        &im2col_cycles, &matmul_cycles, CFG_A);
 
     // Add residuals
     start = read_cycles();

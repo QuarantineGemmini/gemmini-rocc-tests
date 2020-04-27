@@ -55,7 +55,7 @@ static void tiled_matmul_auto_raw(
     gemmini_config_size1(K);
     gemmini_config_repeating_bias(repeating_bias);
     // [ssteffl] TODO: we might also want input-stationary, but not OS... 
-    printf("GEMMINI_SIZES:    - [%u, %u, %u]\n", dim_I, dim_K, dim_J); // YAML 
+    printf("GEMMINI_SIZES:    - [%u, %u, %u]\n", M, K, N); // YAML 
     gemmini_config_ex(WEIGHT_STATIONARY, act, 0, shift, relu6_shift);
     gemmini_compute();
   } else {
