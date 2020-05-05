@@ -222,6 +222,43 @@ static void im2col(size_t batch_size, size_t channels, size_t im_dim,
         params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
     int patch_row = 0;
     
+    // Output-referred edition 
+    printf("OUTPUT_IM2COL:\n"); 
+
+    int ks = params->kernel_size;
+    int kernels_per_row = (params->in_dim - params->kernel_size + 2*params->padding) / params->stride + 1; // rows
+    int kernels_per_col = (params->in_dim - params->kernel_size + 2*params->padding) / params->stride + 1; // cols
+    for (int n_batch = 0; n_batch < params->batch_size; n_batch++) {
+        for (int row = 0; row < I; row++) {
+            for (int col = 0; col < K; row++) {
+                
+                // Figure out which of the n filters/ kernels this index maps onto 
+                // n_kernel = row 
+                int chan = col / (ks*ks);
+                int idx_in_kernel = col % (ks*ks);
+                int row_in_kernel = idx_in_kernel / ks;
+                int col_in_kernel = idx_in_kernel % ks;
+                
+                int kernel_start_row = row / kernels_per_row - params->padding;
+                int kernel_start_col = row % kernels_per_col - params->padding;
+
+                // Index in original: start + offset
+                int input_row = kernel_start_row + row_in_kernel;
+                int input_col = kernel_start_col + col_in_kernel;
+                if (input_row < 0 || input_col < 0) {
+                    printf("OUTPUT_IM2COL_ADDR:    - [%u, %u, %u, %u, %u, %u]\n", 
+                                    row, col, n_batch, -1, -1, -1); 
+                    output[row][col] = 0;
+                } else {
+                    output[row][col] = input[n_batch][input_row][input_col][chan]; 
+                    printf("OUTPUT_IM2COL_ADDR:    - [%u, %u, %u, %u, %u, %u]\n", 
+                                    row, col, n_batch, input_row, input_col, chan); 
+                }
+            }
+        }
+    }
+
+    printf("INPUT_IM2COL:\n"); 
 
     for (int n_batch = 0; n_batch < params->batch_size; n_batch++) {
         for (int im_row = -params->padding; im_row < params->in_dim - params->kernel_size + params->padding + 1; im_row += params->stride) {
@@ -238,16 +275,14 @@ static void im2col(size_t batch_size, size_t channels, size_t im_dim,
                                 || pixel_col < 0 || pixel_col >= params->in_dim) {
                                 // output[patch_row][patch_col] = 0;
                             } else {
-                                void * rel_addr = input[n_batch][pixel_row][pixel_col][im_channel] - base_addr;
-                                printf("IM2COL_ADDR:    - [%u, %u, %u]\n", patch_row, patch_col, rel_addr); 
+                                printf("INPUT_IM2COL_ADDR:    - [%u, %u, %u, %u, %u, %u]\n", 
+                                    patch_row, patch_col, n_batch, pixel_row, pixel_col, im_channel); 
                                 output[patch_row][patch_col] = input[n_batch][pixel_row][pixel_col][im_channel];
                             }
-                            
                             patch_col++;
                         }
                     }
                 }
-                
                 patch_row++;
             }
         }
