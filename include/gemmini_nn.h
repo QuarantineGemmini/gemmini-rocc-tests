@@ -25,6 +25,14 @@ struct ConvParams {
     int I, J, K;
 };
 
+struct ConvIndex {
+    int n_batch;
+    int row;
+    int col;
+    int chan;
+    bool valid;
+};
+
 struct FcParams {
     int batch_size;
     int in_features;
@@ -211,80 +219,83 @@ static void conv_dw_with_col2im(size_t prev_I, size_t prev_J, size_t I, size_t J
     }
 }
 
+struct ConvIndex im2col_index(int row, int col, const struct ConvParams* params) {
+    /* 
+    Calculate input-tensor indicies n_batch, row, col, channel, 
+    from im2col output indicies row, col 
+    Returns a `ConvIndex` with valid=true for elements in the input tensor, 
+    and valid=false for non-existent entries, e.g. those from padding. 
+    */
+
+    // This first bit can eventually be done offline per `ConvParams` struct, each of which are generally widely re-used. 
+    int kernels_per_row = (params->in_dim - params->kernel_size + 2*params->padding) / params->stride + 1; // rows
+    int kernels_per_col = (params->in_dim - params->kernel_size + 2*params->padding) / params->stride + 1; // cols
+    int output_rows_per_batch = kernels_per_row * kernels_per_col;
+    
+    // Calculate our batch and channel index
+    int ks = params->kernel_size;
+    int chan = col / (ks*ks);
+    int n_batch = row / output_rows_per_batch;
+
+    if (n_batch >= params->batch_size || chan >= params->in_channels) {
+        // Batch or channel out-of-bounds due to output-matrix size-padding
+        struct ConvIndex ci = {.n_batch=-1, .row=-1, .col=-1, .chan=-1, .valid=false}; 
+        return ci;
+    }
+
+    // Figure out which of the rows/filters/kernels this index maps onto 
+    int row_in_batch = row % output_rows_per_batch;
+    
+    // Find the element position within that kernel 
+    int idx_in_kernel = col % (ks*ks);
+    int row_in_kernel = idx_in_kernel / ks;
+    int col_in_kernel = idx_in_kernel % ks;
+    
+    // Figure out the kernel's top-left indices
+    int kernel_start_row = params->stride * (row_in_batch / kernels_per_row) - params->padding;
+    int kernel_start_col = params->stride * (row_in_batch % kernels_per_row) - params->padding;
+
+    // And finally, total the start-index and offset
+    int input_row = kernel_start_row + row_in_kernel;
+    int input_col = kernel_start_col + col_in_kernel;
+
+    if (input_row < 0 || input_row >= params->in_dim || 
+        input_col < 0 || input_col >= params->in_dim ) {
+        // Out of bounds due to padding
+        struct ConvIndex ci = {.n_batch=-1, .row=-1, .col=-1, .chan=-1, .valid=false}; 
+        return ci;
+    } 
+    // Making it here means we've got a valid entry in the input tensor. 
+    struct ConvIndex ci = {.n_batch=n_batch, .row=input_row, .col=input_col, .chan=chan, .valid=true}; 
+    return ci; 
+}
+
 static void im2col(size_t batch_size, size_t channels, size_t im_dim,
     size_t I, size_t K,
     const elem_t input[batch_size][im_dim][im_dim][channels],
     elem_t output[I][K],
     const struct ConvParams * params)
 {
-    void * base_addr = &input[0][0][0][0];
-    printf("IM2COL_PARAMS:    - [%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u]\n", batch_size, channels, im_dim, I, K, 
-        params->batch_size, params->padding, params->in_dim, params->kernel_size, params->stride, params->in_channels); // YAML-ish 
-    int patch_row = 0;
+    printf("IM2COL_PARAMS:    - \n");
+    printf("IM2COL_PARAMS:      batch_size: %d \n", params->batch_size);
+    printf("IM2COL_PARAMS:      padding: %d \n", params->padding);
+    printf("IM2COL_PARAMS:      in_dim: %d \n", params->in_dim);
+    printf("IM2COL_PARAMS:      kernel_size: %d \n", params->kernel_size);
+    printf("IM2COL_PARAMS:      stride: %d \n", params->stride);
+    printf("IM2COL_PARAMS:      in_channels: %d \n", params->in_channels);
+    printf("IM2COL_PARAMS:      I: %d \n", I);
+    printf("IM2COL_PARAMS:      K: %d \n", K);
     
-    // Output-referred edition 
-    printf("OUTPUT_IM2COL:\n"); 
-
-    int ks = params->kernel_size;
-    int kernels_per_row = (params->in_dim - params->kernel_size + 2*params->padding) / params->stride + 1; // rows
-    int kernels_per_col = (params->in_dim - params->kernel_size + 2*params->padding) / params->stride + 1; // cols
-    for (int n_batch = 0; n_batch < params->batch_size; n_batch++) {
-        for (int row = 0; row < I; row++) {
-            for (int col = 0; col < K; row++) {
-                
-                // Figure out which of the n filters/ kernels this index maps onto 
-                // n_kernel = row 
-                int chan = col / (ks*ks);
-                int idx_in_kernel = col % (ks*ks);
-                int row_in_kernel = idx_in_kernel / ks;
-                int col_in_kernel = idx_in_kernel % ks;
-                
-                int kernel_start_row = row / kernels_per_row - params->padding;
-                int kernel_start_col = row % kernels_per_col - params->padding;
-
-                // Index in original: start + offset
-                int input_row = kernel_start_row + row_in_kernel;
-                int input_col = kernel_start_col + col_in_kernel;
-                if (input_row < 0 || input_col < 0) {
-                    printf("OUTPUT_IM2COL_ADDR:    - [%u, %u, %u, %u, %u, %u]\n", 
-                                    row, col, n_batch, -1, -1, -1); 
-                    output[row][col] = 0;
-                } else {
-                    output[row][col] = input[n_batch][input_row][input_col][chan]; 
-                    printf("OUTPUT_IM2COL_ADDR:    - [%u, %u, %u, %u, %u, %u]\n", 
-                                    row, col, n_batch, input_row, input_col, chan); 
-                }
-            }
-        }
-    }
-
-    printf("INPUT_IM2COL:\n"); 
-
-    for (int n_batch = 0; n_batch < params->batch_size; n_batch++) {
-        for (int im_row = -params->padding; im_row < params->in_dim - params->kernel_size + params->padding + 1; im_row += params->stride) {
-            for (int im_col = -params->padding; im_col < params->in_dim - params->kernel_size + params->padding + 1; im_col += params->stride) {
-                int patch_col = 0;
-
-                for (int im_channel = 0; im_channel < params->in_channels; im_channel++) {
-                    for (int filter_row = 0; filter_row < params->kernel_size; filter_row++) {
-                        for (int filter_col = 0; filter_col < params->kernel_size; filter_col++) {
-                            int pixel_row = im_row + filter_row;
-                            int pixel_col = im_col + filter_col;
-                            
-                            if (pixel_row < 0 || pixel_row >= params->in_dim
-                                || pixel_col < 0 || pixel_col >= params->in_dim) {
-                                // output[patch_row][patch_col] = 0;
-                            } else {
-                                printf("INPUT_IM2COL_ADDR:    - [%u, %u, %u, %u, %u, %u]\n", 
-                                    patch_row, patch_col, n_batch, pixel_row, pixel_col, im_channel); 
-                                output[patch_row][patch_col] = input[n_batch][pixel_row][pixel_col][im_channel];
-                            }
-                            patch_col++;
-                        }
-                    }
-                }
-                patch_row++;
-            }
+    // Output-referred im2col edition 
+    // FIXME: consistency checks for sizes
+    // I >= output_rows_per_batch * params-> n_batches
+    // K > something else 
+    
+    for (int row = 0; row < I; row++) {
+        for (int col = 0; col < K; col++) {
+            struct ConvIndex ii = im2col_index(row, col, params);
+            if (ii.valid) output[row][col] = input[ii.n_batch][ii.row][ii.col][ii.chan];
+            else output[row][col] = 0;
         }
     }
 }
