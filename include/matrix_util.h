@@ -111,14 +111,17 @@ static void dump_matrix_o(const char *name,const acc_t *m,size_t r,size_t c){
 //============================================================================
 static bool compare_matrices_i(
   elem_t *test, elem_t *gold, size_t r, size_t c) {
+  bool success = true;
   for(size_t i=0; i<r; i++) {
     for(size_t j=0; j<c; j++) {
       if(test[i*c+j] != gold[i*c+j]) {
-        return false;
+        printf("differ at index [%d][%d].test=%d, gold=%d\n",
+            i, j, test[i*c+j], gold[i*c+j]);
+        success = false;
       }
     }
   }
-  return true;
+  return success;
 }
 
 #endif // __MATRIX_UTIL__
