@@ -4,6 +4,9 @@ build
 build_orig_tiler
 build_fsm_tiler
 build_hw_tiler
+build_orig_tiler_gemm
+build_fsm_tiler_gemm
+build_hw_tiler_gemm
 autom4te.cache
 configure
 .ipynb_checkpoints
