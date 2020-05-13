@@ -67,6 +67,9 @@
 #define RELU 1
 #define RELU6 2
 
+#define ADDR_MODE_NORMAL  ((uint64_t)0 << 63)
+#define ADDR_MODE_IM2COL  ((uint64_t)1 << 63)
+
 //============================================================================
 // base rocc insn formats
 //============================================================================
@@ -106,7 +109,8 @@
   gemmini_extended_mvout(dram_addr, spad_addr, DIM, DIM)
 
 // compute
-#define gemmini_extended_compute_preloaded(A, BD, A_cols, A_rows, BD_cols, BD_rows) \
+#define gemmini_extended_compute_preloaded(A, BD, A_cols, A_rows, \
+                                           BD_cols, BD_rows) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
       ((uint64_t)  (A_rows) << (ADDR_LEN + 16)) | \
         ((uint64_t)(A_cols) <<  ADDR_LEN) | \
@@ -116,7 +120,8 @@
         ((uint64_t)(BD)), \
       k_COMPUTE_PRELOADED)
 
-#define gemmini_extended_compute_accumulated(A, BD, A_cols, A_rows, BD_cols, BD_rows) \
+#define gemmini_extended_compute_accumulated(A, BD, A_cols, A_rows, \
+                                             BD_cols, BD_rows) \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
       ((uint64_t)  (A_rows) << (ADDR_LEN + 16)) | \
         ((uint64_t)(A_cols) <<  ADDR_LEN) | \
@@ -205,11 +210,32 @@
 #define gemmini_config_reset() \
   ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, 0, k_RESET)
 
-#define gemmini_config_addr_mode(mat, mode, rows, cols, batch_size, channels, padding, kernel_size, stride) \
-  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, (((uint64_t)(rows) << 32) | (uint64_t)(cols)), \
-  (((uint64_t)(mat) << 60) | ((uint64_t)(mode) << 56) | ((uint64_t)(stride) << 48) | ((uint64_t)(padding) << 40) | ((uint64_t)(channels) << 32) | \
-   ((uint64_t)(kernel_size)) << 16 | ((uint64_t)batch_size)), \
-    k_CFG_A)
+//============================================================================
+// Gemmini2+im2col ISA 
+//============================================================================
+#define gemmini_config_addr_im2col(in_rows, in_cols, stride, padding, \
+                                   in_channels, kernel_size, funct7) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, \
+    (((uint64_t)(in_rows) << 32) | \
+      (uint64_t)(in_cols)), \
+    (((uint64_t)(stride) << 48) | \
+      ((uint64_t)(padding) << 40) | \
+      ((uint64_t)(in_channels) << 32) | \
+      ((uint64_t)(kernel_size)) << 16 | \
+      ADDR_MODE_IM2COL), \
+    funct7)
+
+#define gemmini_config_addr_im2col_A(in_rows, in_cols, stride, padding, \
+                                     in_channels, kernel_size) \
+  gemmini_config_addr_im2col(in_rows, in_cols, stride, padding, \
+                             in_channels, kernel_size, k_CFG_A)
+
+//---------------------------------------------------------------------------
+#define gemmini_config_addr_normal(funct7) \
+  ROCC_INSTRUCTION_RS1_RS2(XCUSTOM_ACC, 0, ADDR_MODE_NORMAL, funct7)
+
+#define gemmini_config_addr_normal_A() \
+  gemmini_config_addr_normal(k_CFG_A)
 
 #endif // __GEMMINI_ISA_H__
 

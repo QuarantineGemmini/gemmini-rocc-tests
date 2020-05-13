@@ -46,9 +46,6 @@ static void tiled_matmul_auto_raw(
   // sanitize inputs before starting
   if(is_valid_to_continue(M, N, K, A, B, D, C, act, shift, 
                           relu6_shift, repeating_bias, mm_type)) {
-    // [ssteffl] TODO: should we reset every time?
-    // [df] TODO: not if we want to retain config state, e.g. im2col addressing
-    // gemmini_config_reset();
     gemmini_config_addr_ab((uintptr_t)A, (uintptr_t)B);
     gemmini_config_addr_cd((uintptr_t)C, (uintptr_t)D);
     gemmini_config_size0(M, N);

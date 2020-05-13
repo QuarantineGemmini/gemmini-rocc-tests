@@ -225,18 +225,6 @@ int is_equal(elem_t x[DIM][DIM], elem_t y[DIM][DIM]) {
   return 1;
 }
 
-// This is a GNU extension known as statment expressions
-#define MAT_IS_EQUAL(dim_i, dim_j, x, y) \
-    ({int result = 1; \
-      for (size_t i = 0; i < dim_i; i++) \
-        for (size_t j = 0; j < dim_j; ++j) \
-          if (x[i][j] != y[i][j]) { \
-            result = 0; \
-            printf("C[%d][%d]=%d, gold[%d][%d]=%d\n", i, j, x[i][j], i, j, y[i][j]); \
-            break; \
-          } \
-      result;})
-
 int rand() {
   static uint32_t x = 777;
   x = x * 1664525 + 1013904223;

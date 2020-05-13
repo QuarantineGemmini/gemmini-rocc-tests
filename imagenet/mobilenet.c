@@ -51,7 +51,7 @@ int main (int argc, char * argv[]) {
         conv_1_in, conv_1_w, conv_1_b, conv_1_out,
         RELU, conv_1_params.output_scale, 0, true,
         tiled_matmul_type, check, "conv_1",
-        &im2col_cycles, &matmul_cycles, CFG_A);
+        &im2col_cycles, &matmul_cycles);
 
     // conv_dw_2
     start = read_cycles();
