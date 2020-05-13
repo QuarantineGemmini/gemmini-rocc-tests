@@ -220,8 +220,8 @@
       (uint64_t)(in_cols)), \
     (((uint64_t)(stride) << 48) | \
       ((uint64_t)(padding) << 40) | \
-      ((uint64_t)(in_channels) << 32) | \
-      ((uint64_t)(kernel_size)) << 16 | \
+      ((uint64_t)(in_channels) << 24) | \
+      ((uint64_t)(kernel_size)) << 8 | \
       ADDR_MODE_IM2COL), \
     funct7)
 

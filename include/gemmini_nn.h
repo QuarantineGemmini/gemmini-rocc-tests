@@ -289,17 +289,15 @@ static void new_sw_im2col(
   DEBUG("  in_channels: %d", p->in_channels);
   DEBUG("  kernel_size: %d", p->kernel_size);
   DEBUG("  I: %d",           I);
-  DEBUG("  K: %d",           K);
   
-  size_t IN_ROWS       = p->in_dim;
-  size_t IN_COLS       = p->in_dim;
-  size_t IN_CHANS      = p->in_channels;
-  size_t KERNEL_COLS   = p->kernel_size;
-  size_t KERNEL_ROWS   = p->kernel_size;
-  size_t ITERS_PER_ROW = K / KERNEL_ROWS;
+  size_t IN_ROWS     = p->in_dim;
+  size_t IN_COLS     = p->in_dim;
+  size_t IN_CHANS    = p->in_channels;
+  size_t KERNEL_COLS = p->kernel_size;
+  size_t KERNEL_ROWS = p->kernel_size;
 
-  int OUT_ROWS      = (p->in_dim + 2*p->padding - KERNEL_ROWS + 1) /p->stride;
-  int OUT_COLS      = (p->in_dim + 2*p->padding - KERNEL_COLS + 1) /p->stride;
+  int OUT_ROWS = (p->in_dim + 2*p->padding - KERNEL_ROWS + 1) / p->stride;
+  int OUT_COLS = (p->in_dim + 2*p->padding - KERNEL_COLS + 1) / p->stride;
   int OUT_ITEM_ROWS = (OUT_ROWS * OUT_COLS);
 
   for (int out_row = 0; out_row < I; out_row++) {
@@ -316,6 +314,8 @@ static void new_sw_im2col(
           int out_col = (ichan * KERNEL_COLS * KERNEL_ROWS) + 
                         (krow  * KERNEL_COLS) + 
                         (kcol);
+          ASSERT(out_col < K, "out_col=%d K=%d", out_col, K);
+
           int in_row = start_in_row + krow;
           int in_col = start_in_col + kcol;
           if (in_row<0 || in_row>=IN_ROWS || in_col<0 || in_col>=IN_COLS) { 
